@@ -5,6 +5,8 @@
  *      Author: Ruan de Jager
  */
 
+#include "dbg_log.h"
+
 
 #include "LoraRadio.h"
 #include <string.h>
@@ -49,14 +51,14 @@ void LORARADIO_vInit(void) {
             LORA_TASK_STACK_SIZE,
             NULL,
             LORA_TASK_PRIORITY,
-            NULL);
+			&LORARADIO_vRxTask_handle);
     configASSERT(status == pdPASS);
     status = xTaskCreate(LORARADIO_vTxTask,
             "LoRaRadioTxTask",
             LORA_TASK_STACK_SIZE,
             NULL,
             LORA_TASK_PRIORITY,
-            NULL);
+			&LORARADIO_vTxTask_handle);
     configASSERT(status == pdPASS);
 
     LORARADIO_vRadioHWInit(); // Initialize LoRa hardware
@@ -102,6 +104,8 @@ void LORARADIO_vRxTask(void *parameters)
     	    // handle send failure
     		// Maybe keep track of a bitmasked error code
     	}
+
+    	DBG("RX-ing\r\n");
 
     	// Now we re-enter RX listening mode
     	LORARADIO_vEnterHWRxMode(0x00);
