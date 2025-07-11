@@ -1,0 +1,58 @@
+﻿// farmranger tag comms protobuffer definition
+
+syntax = "proto3";
+
+message MeshPacketHeader {
+
+    MeshPacketType packetType = 1;
+    uint32 senderID = 2;
+    uint32 dReqID = 3;
+
+}
+
+message MeshNeighborInfo {
+
+    uint32 deviceID = 1;
+    uint32 hopCount = 2;
+    int32 rssi = 3;
+    int32 snr = 4;
+
+}
+
+message MeshDReqPacket {
+
+    MeshPacketHeader Header = 1;
+    uint32 Ttl = 2;
+    int32 Rssi = 3;
+    int32 Snr = 4;
+
+}
+
+message MeshDRepPacket {
+
+    MeshPacketHeader Header = 1;
+    uint32 OGDreqSenderID = 2;
+    uint32 ParentID = 3;
+    uint32 NeighborCount = 4;
+    repeated MeshNeighborInfo NeighborList = 5;
+    uint32 crc = 6;
+
+}
+
+message TimeSyncMessage {
+
+    uint32 SenderID = 1;
+    uint32 UtcTimestamp = 2;
+
+}
+
+// Definition for fixed options for day-time-zone interval
+enum MeshPacketType
+{
+	RESERVED = 0;
+	MESH_PACKET_TYPE_DREQ = 1;
+	MESH_PACKET_TYPE_DREP = 2;
+	MESH_PACKET_TYPE_TIMESYNC = 3;
+}
+
+

@@ -1,0 +1,1 @@
+protoc --proto_path C:\Code\frTag_E5mini\Protobuf_Generation\ frtag_pb_msg.proto --csharp_out=.
