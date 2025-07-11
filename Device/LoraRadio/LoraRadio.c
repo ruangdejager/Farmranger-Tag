@@ -30,12 +30,6 @@ TaskHandle_t LORARADIO_vTxTask_handle;
 // --- LOCAL VARIABLE DEFINES ---
 static uint8_t u8DevEUI[8];
 
-// This is a HW based variable that contains the config material
-// This would like be different for another device
-PacketParams_t packetParams;
-// --- CONFIG CONSTANTS ---
-const RadioLoRaBandwidths_t Bandwidths[] = { LORA_BW_125, LORA_BW_250, LORA_BW_500 };
-
 // --- PUBLIC FUNCTIONS ---
 
 void LORARADIO_vInit(void) {
@@ -66,15 +60,16 @@ void LORARADIO_vInit(void) {
 
 }
 
-bool LORARADIO_bRxPacket(LoraRadio_Packet_t * packet, TickType_t timeout_ms) {
-    return xQueueReceive(xLoRaRxQueue, packet, pdMS_TO_TICKS(timeout_ms)) == pdPASS;
+// Function that exposes a read from the rx queue
+bool LORARADIO_bRxPacket(LoraRadio_Packet_t * packet) {
+    return xQueueReceive(xLoRaRxQueue, packet, pdMS_TO_TICKS(100)) == pdPASS;
 }
-
-bool LORARADIO_bTxPacket(LoraRadio_Packet_t * packet, TickType_t timeout_ms) {
+// Function that exposes a push to the tx queue
+bool LORARADIO_bTxPacket(LoraRadio_Packet_t * packet) {
     if (packet->length > LORA_MAX_PACKET_SIZE) {
         return false;
     }
-    if (xQueueSend(xLoRaTxQueue, packet, pdMS_TO_TICKS(timeout_ms)) == pdPASS) {
+    if (xQueueSend(xLoRaTxQueue, packet, pdMS_TO_TICKS(100)) == pdPASS) {
         return true;
     }
     return false;
@@ -100,12 +95,13 @@ void LORARADIO_vRxTask(void *parameters)
 		memset(&rx_packet, 0, sizeof(LoraRadio_Packet_t));
 		LORARADIO_bRadioHWRx(&rx_packet);
 
-    	if (xQueueSend(xLoRaRxQueue, &rx_packet, portMAX_DELAY) != pdPASS) {
+    	if (xQueueSend(xLoRaRxQueue, &rx_packet, pdMS_TO_TICKS(100)) != pdPASS) {
     	    // handle send failure
+    		DBG("RX-Queue Full\r\n");
     		// Maybe keep track of a bitmasked error code
+    	} else {
+    		DBG("Sending to RX-Queue\r\n");
     	}
-
-    	DBG("RX-ing\r\n");
 
     	// Now we re-enter RX listening mode
     	LORARADIO_vEnterHWRxMode(0x00);
@@ -144,6 +140,9 @@ void LORARADIO_vTxTask(void *parameters)
 }
 
 void LORARADIO_vRadioHWInit(void) {
+
+	PacketParams_t packetParams;
+
     // Initialize the hardware (SPI bus, TCXO control, RF switch)
     SUBGRF_Init(LORARADIO_vRadioOnDioIrq);
 
@@ -166,7 +165,7 @@ void LORARADIO_vRadioHWInit(void) {
 
     ModulationParams_t modulationParams;
     modulationParams.PacketType = PACKET_TYPE_LORA;
-    modulationParams.Params.LoRa.Bandwidth = Bandwidths[LORA_BANDWIDTH];
+    modulationParams.Params.LoRa.Bandwidth = LORA_BANDWIDTH;
     modulationParams.Params.LoRa.CodingRate = (RadioLoRaCodingRates_t)LORA_CODINGRATE;
     modulationParams.Params.LoRa.LowDatarateOptimize = 0x00;
     modulationParams.Params.LoRa.SpreadingFactor = (RadioLoRaSpreadingFactors_t)LORA_SPREADING_FACTOR;
@@ -213,6 +212,7 @@ bool LORARADIO_bRadioHWTx(uint8_t *payload, uint8_t payload_length)
 	// Workaround 5.1 in DS.SX1261-2.W.APP (before each packet transmission)
 	SUBGRF_WriteRegister(0x0889, (SUBGRF_ReadRegister(0x0889) | 0x04));
 
+	PacketParams_t packetParams;
 	packetParams.Params.LoRa.PayloadLength = payload_length;
 	SUBGRF_SetPacketParams(&packetParams);
 	SUBGRF_SendPayload(payload, payload_length, 0x00);

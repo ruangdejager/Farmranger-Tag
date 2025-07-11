@@ -38,7 +38,7 @@ void LORARADIO_vInit(void);
  * @param timeout_ms Timeout in milliseconds to wait for a packet.
  * @return true if a packet was received, false otherwise.
  */
-bool LORARADIO_bRxPacket(LoraRadio_Packet_t * packet, TickType_t timeout_ms);
+bool LORARADIO_bRxPacket(LoraRadio_Packet_t * packet);
 
 /**
  * @brief Sends a LoRa packet.
@@ -46,7 +46,7 @@ bool LORARADIO_bRxPacket(LoraRadio_Packet_t * packet, TickType_t timeout_ms);
  * @param timeout_ms Timeout in milliseconds to wait if the TX queue is full.
  * @return true if the packet was successfully queued for transmission, false otherwise.
  */
-bool LORARADIO_bTxPacket(LoraRadio_Packet_t * packet, TickType_t timeout_ms);
+bool LORARADIO_bTxPacket(LoraRadio_Packet_t * packet);
 
 /**
  * @brief LoRa Radio RX FreeRTOS Task.
