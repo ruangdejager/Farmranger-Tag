@@ -7,11 +7,8 @@
 
 
 #include "LoraRadio.h"
-#include "FreeRTOS.h"
-#include "task.h"
-#include "queue.h"
-#include <string.h> // For memcpy, memset
-#include <stdio.h>  // For printf (for debugging)
+#include <string.h>
+#include <stdio.h>
 
 // --- PRIVATE DEFINES ---
 #define LORA_TX_QUEUE_SIZE      (10)
@@ -24,105 +21,222 @@
 static QueueHandle_t xLoRaTxQueue; // Queue for packets to be sent by LoraRadio_send_packet
 static QueueHandle_t xLoRaRxQueue; // Queue for raw received packets from LoraRadio_HwReceive
 
+// --- PRIVATE FREE_RTOS TASK HANDLEs ---
+TaskHandle_t LORARADIO_vRxTask_handle;
+TaskHandle_t LORARADIO_vTxTask_handle;
+
+// --- LOCAL VARIABLE DEFINES ---
+static uint8_t u8DevEUI[8];
+
+// This is a HW based variable that contains the config material
+// This would like be different for another device
+PacketParams_t packetParams;
+// --- CONFIG CONSTANTS ---
+const RadioLoRaBandwidths_t Bandwidths[] = { LORA_BW_125, LORA_BW_250, LORA_BW_500 };
+
 // --- PUBLIC FUNCTIONS ---
 
-void LoraRadio_init(void) {
+void LORARADIO_vInit(void) {
+
     xLoRaTxQueue = xQueueCreate(LORA_TX_QUEUE_SIZE, sizeof(LoraRadio_Packet_t));
     xLoRaRxQueue = xQueueCreate(LORA_RX_QUEUE_SIZE, sizeof(LoraRadio_Packet_t));
 
-    if (xLoRaTxQueue == NULL || xLoRaRxQueue == NULL) {
-        printf("LoraRadio: Failed to create FreeRTOS queues!\r\n");
-        // Handle error appropriately, e.g., infinite loop or system reset
-        while(1);
-    }
+    configASSERT(xLoRaTxQueue != NULL || xLoRaRxQueue != NULL); // catch creation failure
 
-    xTaskCreate(vLoRaTransceiverTask,
-                "LoRaTask",
-                LORA_TASK_STACK_SIZE,
-                NULL,
-                LORA_TASK_PRIORITY,
-                NULL);
+    BaseType_t status;
+    status = xTaskCreate(LORARADIO_vRxTask,
+            "LoRaRadioRxTask",
+            LORA_TASK_STACK_SIZE,
+            NULL,
+            LORA_TASK_PRIORITY,
+            NULL);
+    configASSERT(status == pdPASS);
+    status = xTaskCreate(LORARADIO_vTxTask,
+            "LoRaRadioTxTask",
+            LORA_TASK_STACK_SIZE,
+            NULL,
+            LORA_TASK_PRIORITY,
+            NULL);
+    configASSERT(status == pdPASS);
 
-    printf("LoraRadio: Initialized FreeRTOS resources and created LoRaTask.\r\n");
+    LORARADIO_vRadioHWInit(); // Initialize LoRa hardware
+    LORARADIO_vEnterHWRxMode(0x00); // Start listening
+
 }
 
-bool LoraRadio_send_packet(const LoraRadio_Packet_t *packet, TickType_t timeout_ms) {
-    if (packet->len > LORA_MAX_PACKET_SIZE) {
-        printf("LoraRadio: Packet too large to send (%u bytes).\r\n", packet->len);
+bool LORARADIO_bRxPacket(LoraRadio_Packet_t * packet, TickType_t timeout_ms) {
+    return xQueueReceive(xLoRaRxQueue, packet, pdMS_TO_TICKS(timeout_ms)) == pdPASS;
+}
+
+bool LORARADIO_bTxPacket(LoraRadio_Packet_t * packet, TickType_t timeout_ms) {
+    if (packet->length > LORA_MAX_PACKET_SIZE) {
         return false;
     }
     if (xQueueSend(xLoRaTxQueue, packet, pdMS_TO_TICKS(timeout_ms)) == pdPASS) {
         return true;
     }
-    printf("LoraRadio: Failed to queue packet for TX (queue full or timeout).\r\n");
     return false;
 }
 
-bool LoraRadio_receive_packet(LoraRadio_Packet_t *packet, TickType_t timeout_ms) {
-    return xQueueReceive(xLoRaRxQueue, packet, pdMS_TO_TICKS(timeout_ms)) == pdPASS;
-}
+void LORARADIO_vRxTask(void *parameters)
+{
 
-// --- FREE_RTOS TASK IMPLEMENTATION ---
-
-void vLoRaTransceiverTask(void *pvParameters) {
-    (void)pvParameters;
-
-    LoraRadio_HwInit(); // Initialize LoRa hardware
-    LoraRadio_HwSetReceiveMode(); // Start listening
-
-    LoraRadio_Packet_t tx_packet;
     LoraRadio_Packet_t rx_packet;
 
-    for (;;) {
-        // 1. Process outgoing packets from the TX queue
-        if (xQueueReceive(xLoRaTxQueue, &tx_packet, 0) == pdPASS) {
-            printf("LoRaTask: Sending packet (len: %u).\r\n", tx_packet.len);
-            if (LoraRadio_HwSend(tx_packet.data, tx_packet.len)) {
-                printf("LoRaTask: Packet sent successfully.\r\n");
-            } else {
-                printf("LoRaTask: Failed to send packet.\r\n");
-            }
-            LoraRadio_HwSetReceiveMode(); // Return to RX mode after TX
-        }
+	for (;;)
+	{
+		// Wait indefinitely for an RX ISR on the LORA radio
+		uint32_t ulCount = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-        // 2. Check for received packets from hardware
-        uint16_t actual_len;
-        int16_t rssi;
-        int8_t snr;
-        if (LoraRadio_HwReceive(rx_packet.data, LORA_MAX_PACKET_SIZE, &actual_len, &rssi, &snr)) {
-            rx_packet.len = actual_len;
-            rx_packet.rssi = rssi;
-            rx_packet.snr = snr;
-            if (xQueueSend(xLoRaRxQueue, &rx_packet, 0) != pdPASS) {
-                printf("LoRaTask: RX queue full, packet dropped.\r\n");
-            } else {
-                printf("LoRaTask: Packet received (len: %u, RSSI: %d, SNR: %d).\r\n", rx_packet.len, rx_packet.rssi, rx_packet.snr);
-            }
-        }
+		// If the ulCount is greater than one, we received an RX ISR while we weren't ready for it and
+		// probably lost it
+		if (ulCount > 1)
+		{
+			// RX ISR before done with SUBGHZ buf read
+		}
 
-        vTaskDelay(pdMS_TO_TICKS(LORA_POLLING_DELAY_MS)); // Small delay to yield CPU
-    }
+		memset(&rx_packet, 0, sizeof(LoraRadio_Packet_t));
+		LORARADIO_bRadioHWRx(&rx_packet);
+
+    	if (xQueueSend(xLoRaRxQueue, &rx_packet, portMAX_DELAY) != pdPASS) {
+    	    // handle send failure
+    		// Maybe keep track of a bitmasked error code
+    	}
+
+    	// Now we re-enter RX listening mode
+    	LORARADIO_vEnterHWRxMode(0x00);
+
+	}
+
+	vTaskDelete(NULL);
 }
 
-// --- LORA DRIVER PLACEHOLDERS (YOU MUST IMPLEMENT THESE) ---
-// Replace these with actual calls to your LoRa chip driver functions.
+void LORARADIO_vTxTask(void *parameters)
+{
 
-void LoraRadio_HwInit(void) {
-    printf("LoRaRadio_Hw: Initializing LoRa module hardware...\r\n");
-    // Example: SX1276_init(); Configure frequency, SF, BW, CR, TX power etc.
-    vTaskDelay(pdMS_TO_TICKS(100)); // Simulate init time
-    printf("LoRaRadio_Hw: Module hardware initialized.\r\n");
+	LoraRadio_Packet_t tx_packet;
+
+	for (;;)
+	{
+
+		if (xQueueReceive(xLoRaTxQueue, &tx_packet, portMAX_DELAY) == pdPASS)
+		{
+
+			if (LORARADIO_bRadioHWTx(tx_packet.buffer, tx_packet.length))
+			{
+				// We got the TX_DONE interrupt and the TX was successful
+			} else {
+				// No TX_DONE interrupt, the freertos notification timeout triggered
+			}
+
+			SUBGRF_SetStandby( STDBY_RC );
+			LORARADIO_vEnterHWRxMode(0x00);
+
+		}
+
+	}
+
+	vTaskDelete(NULL);
 }
 
-bool LoraRadio_HwSend(const uint8_t *data, uint16_t len) {
-    printf("LoRaRadio_Hw: Sending %u bytes over air...\r\n", len);
-    // Example: SX1276_transmit(data, len);
-    vTaskDelay(pdMS_TO_TICKS(500)); // Simulate airtime
-    printf("LoRaRadio_Hw: Transmission complete.\r\n");
-    return true; // Assume success for now
+void LORARADIO_vRadioHWInit(void) {
+    // Initialize the hardware (SPI bus, TCXO control, RF switch)
+    SUBGRF_Init(LORARADIO_vRadioOnDioIrq);
+
+    // Use DCDC converter if `DCDC_ENABLE` is defined in radio_conf.h
+    // "By default, the SMPS clock detection is disabled and must be enabled before enabling the SMPS." (6.1 in RM0453)
+    SUBGRF_WriteRegister(SUBGHZ_SMPSC0R, (SUBGRF_ReadRegister(SUBGHZ_SMPSC0R) | SMPS_CLK_DET_ENABLE));
+    SUBGRF_SetRegulatorMode();
+
+    // Use the whole 256-byte buffer for both TX and RX
+    SUBGRF_SetBufferBaseAddress(0x00, 0x00);
+
+    SUBGRF_SetRfFrequency(RF_FREQUENCY);
+    SUBGRF_SetRfTxPower(TX_OUTPUT_POWER);
+    SUBGRF_SetStopRxTimerOnPreambleDetect(false);
+
+    SUBGRF_SetPacketType(PACKET_TYPE_LORA);
+
+    SUBGRF_WriteRegister( REG_LR_SYNCWORD, ( LORA_MAC_PRIVATE_SYNCWORD >> 8 ) & 0xFF );
+    SUBGRF_WriteRegister( REG_LR_SYNCWORD + 1, LORA_MAC_PRIVATE_SYNCWORD & 0xFF );
+
+    ModulationParams_t modulationParams;
+    modulationParams.PacketType = PACKET_TYPE_LORA;
+    modulationParams.Params.LoRa.Bandwidth = Bandwidths[LORA_BANDWIDTH];
+    modulationParams.Params.LoRa.CodingRate = (RadioLoRaCodingRates_t)LORA_CODINGRATE;
+    modulationParams.Params.LoRa.LowDatarateOptimize = 0x00;
+    modulationParams.Params.LoRa.SpreadingFactor = (RadioLoRaSpreadingFactors_t)LORA_SPREADING_FACTOR;
+    SUBGRF_SetModulationParams(&modulationParams);
+
+    packetParams.PacketType = PACKET_TYPE_LORA;
+    packetParams.Params.LoRa.CrcMode = LORA_CRC_ON;
+    packetParams.Params.LoRa.HeaderType = LORA_PACKET_VARIABLE_LENGTH;
+    packetParams.Params.LoRa.InvertIQ = LORA_IQ_NORMAL;
+    packetParams.Params.LoRa.PayloadLength = 0xFF;
+    packetParams.Params.LoRa.PreambleLength = LORA_PREAMBLE_LENGTH;
+    SUBGRF_SetPacketParams(&packetParams);
+
+    //SUBGRF_SetLoRaSymbNumTimeout(LORA_SYMBOL_TIMEOUT);
+
+    // WORKAROUND - Optimizing the Inverted IQ Operation, see DS_SX1261-2_V1.2 datasheet chapter 15.4
+    // RegIqPolaritySetup @address 0x0736
+    SUBGRF_WriteRegister( 0x0736, SUBGRF_ReadRegister( 0x0736 ) | ( 1 << 2 ) );
+
+    SUBGRF_SetDioIrqParams(IRQ_RADIO_NONE, IRQ_RADIO_NONE, IRQ_RADIO_NONE, IRQ_RADIO_NONE);
+
+    SUBGRF_SetDioIrqParams( IRQ_TX_DONE | IRQ_RX_TX_TIMEOUT | IRQ_RX_DONE,
+                          IRQ_TX_DONE | IRQ_RX_TX_TIMEOUT,
+                          IRQ_RX_DONE,
+                          IRQ_RADIO_NONE );
+
+    HAL_SUBGHZ_vSetUniqueId(u8DevEUI);
 }
 
-void LORARADIO_vEnterRxMode(uint32_t u32RxTimeout)
+bool LORARADIO_bRadioHWTx(uint8_t *payload, uint8_t payload_length)
+{
+
+	// To-Do: First we should check if the radio is in the correct state capable of going into transmission
+	//
+	//
+	//
+
+	SUBGRF_SetDioIrqParams( IRQ_TX_DONE | IRQ_RX_TX_TIMEOUT,
+						  IRQ_TX_DONE | IRQ_RX_TX_TIMEOUT,
+						  IRQ_RADIO_NONE,
+						  IRQ_RADIO_NONE );
+	SUBGRF_SetSwitch(RFO_LP, RFSWITCH_TX);
+
+	// Workaround 5.1 in DS.SX1261-2.W.APP (before each packet transmission)
+	SUBGRF_WriteRegister(0x0889, (SUBGRF_ReadRegister(0x0889) | 0x04));
+
+	packetParams.Params.LoRa.PayloadLength = payload_length;
+	SUBGRF_SetPacketParams(&packetParams);
+	SUBGRF_SendPayload(payload, payload_length, 0x00);
+
+    // Wait for notification with timeout - Received from TX_DONE interrupt
+    uint32_t result = ulTaskNotifyTake(pdTRUE, 1000);
+
+    return (result > 0);  // true if we got the notification
+
+}
+
+bool LORARADIO_bRadioHWRx(LoraRadio_Packet_t * rxParams) {
+	PacketStatus_t packetStatus;
+	// Workaround 15.3 in DS.SX1261-2.W.APP (because following RX w/ timeout sequence)
+	SUBGRF_WriteRegister(0x0920, 0x00);
+	SUBGRF_WriteRegister(0x0944, (SUBGRF_ReadRegister(0x0944) | 0x02));
+
+	SUBGRF_GetPayload((uint8_t *)rxParams->buffer, &rxParams->length, 0xFF);
+	SUBGRF_GetPacketStatus(&packetStatus);
+
+	rxParams->rssi = packetStatus.Params.LoRa.RssiPkt;
+	rxParams->snr = packetStatus.Params.LoRa.SnrPkt;
+
+	// We can later think how we decide if the reception was successfull, maybe with a CRC?
+	return true;
+}
+
+void LORARADIO_vEnterHWRxMode(uint32_t u32RxTimeout)
 {
 
 	SUBGRF_SetDioIrqParams( IRQ_RX_DONE | IRQ_RX_TX_TIMEOUT | IRQ_CRC_ERROR | IRQ_HEADER_ERROR,
@@ -136,23 +250,59 @@ void LORARADIO_vEnterRxMode(uint32_t u32RxTimeout)
 
 }
 
-bool LoraRadio_HwReceive(uint8_t *data_buffer, uint16_t max_len, uint16_t *actual_len, int16_t *rssi, int8_t *snr) {
-    // This is a polling example. In a real system, you'd likely use an interrupt
-    // to signal a received packet and then read it.
-    // For this example, we simulate receiving a packet occasionally.
+uint32_t LORARADIO_u32GetUniqueId (void)
+{
+	return ((uint32_t)u8DevEUI[0] << 16) |
+	           ((uint32_t)u8DevEUI[1] << 8)  |
+	           ((uint32_t)u8DevEUI[2]);
+}
 
-    static uint32_t rx_counter = 0;
-    if ((xTaskGetTickCount() % 5000) == 0 && rx_counter < 2) { // Simulate a packet every 5 seconds for testing
-        const char *test_msg = "Hello from simulated LoRa!";
-        uint16_t test_len = strlen(test_msg);
-        if (test_len <= max_len) {
-            memcpy(data_buffer, test_msg, test_len);
-            *actual_len = test_len;
-            *rssi = -60; // Example RSSI
-            *snr = 8;    // Example SNR
-            rx_counter++;
-            return true;
-        }
-    }
-    return false; // No packet received
+/**
+  * @brief  Process the RX Done event
+  * @param  fsm pointer to FSM context
+  * @retval None
+  */
+void LORARADIO_vEventRxDone(void)
+{
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+	vTaskNotifyGiveFromISR(LORARADIO_vRxTask_handle, &xHigherPriorityTaskWoken);
+	portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+/**
+  * @brief  Process the TX Done event
+  * @param  fsm pointer to FSM context
+  * @retval None
+  */
+void LORARADIO_vEventTxDone(void)
+{
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+	vTaskNotifyGiveFromISR(LORARADIO_vTxTask_handle, &xHigherPriorityTaskWoken);
+	portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+/**
+  * @brief  Receive data trough SUBGHZSPI peripheral
+  * @param  radioIrq  interrupt pending status information
+  * @retval None
+  */
+void LORARADIO_vRadioOnDioIrq(RadioIrqMasks_t radioIrq)
+{
+  switch (radioIrq)
+  {
+    case IRQ_TX_DONE:
+    	LORARADIO_vEventTxDone();
+      break;
+    case IRQ_RX_DONE:
+    	LORARADIO_vEventRxDone();
+      break;
+    case IRQ_RX_TX_TIMEOUT:
+
+      break;
+    case IRQ_CRC_ERROR:
+
+      break;
+    default:
+      break;
+  }
 }

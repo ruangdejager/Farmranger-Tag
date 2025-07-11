@@ -9,19 +9,19 @@
 #define DEVICE_LORARADIO_LORARADIO_H_
 
 #include "FreeRTOS.h"
+#include "task.h"
 #include "queue.h"
 #include <stdint.h>
 #include <stdbool.h>
 
-// Max LoRa packet size (adjust based on your LoRa module's capabilities)
-#define LORA_MAX_PACKET_SIZE    (256)
+#include "LoraRadio_Config.h"
 
 // Structure for a raw LoRa packet (used for both TX and RX)
 typedef struct {
-    uint8_t  data[LORA_MAX_PACKET_SIZE];
-    uint16_t len;
-    int16_t  rssi; // Received Signal Strength Indicator (only valid for RX)
-    int8_t   snr;  // Signal-to-Noise Ratio (only valid for RX)
+    uint8_t buffer[32];
+    uint8_t length;
+    int8_t rssi;                                //!< The RSSI of the last packet
+    int8_t snr;                                 //!< The SNR of the last packet
 } LoraRadio_Packet_t;
 
 // Function Prototypes
@@ -30,15 +30,7 @@ typedef struct {
  * @brief Initializes the LoRa radio hardware and FreeRTOS resources for this layer.
  * Creates the LoRa transceiver task.
  */
-void LoraRadio_init(void);
-
-/**
- * @brief Sends a LoRa packet.
- * @param packet Pointer to the LoraRadio_Packet_t to send.
- * @param timeout_ms Timeout in milliseconds to wait if the TX queue is full.
- * @return true if the packet was successfully queued for transmission, false otherwise.
- */
-bool LoraRadio_send_packet(const LoraRadio_Packet_t *packet, TickType_t timeout_ms);
+void LORARADIO_vInit(void);
 
 /**
  * @brief Attempts to receive a LoRa packet from the RX queue.
@@ -46,23 +38,37 @@ bool LoraRadio_send_packet(const LoraRadio_Packet_t *packet, TickType_t timeout_
  * @param timeout_ms Timeout in milliseconds to wait for a packet.
  * @return true if a packet was received, false otherwise.
  */
-bool LoraRadio_receive_packet(LoraRadio_Packet_t *packet, TickType_t timeout_ms);
+bool LORARADIO_bRxPacket(LoraRadio_Packet_t * packet, TickType_t timeout_ms);
 
 /**
- * @brief LoRa Radio Transceiver FreeRTOS Task.
- * This task manages the low-level LoRa hardware communication,
- * sending packets from the TX queue and pushing received packets to the RX queue.
+ * @brief Sends a LoRa packet.
+ * @param packet Pointer to the LoraRadio_Packet_t to send.
+ * @param timeout_ms Timeout in milliseconds to wait if the TX queue is full.
+ * @return true if the packet was successfully queued for transmission, false otherwise.
  */
-void vLoRaTransceiverTask(void *pvParameters);
+bool LORARADIO_bTxPacket(LoraRadio_Packet_t * packet, TickType_t timeout_ms);
 
-// --- LoRa Driver Placeholders (YOU MUST IMPLEMENT THESE) ---
+/**
+ * @brief LoRa Radio RX FreeRTOS Task.
+ * This task manages the low-level LoRa hardware reception communication,
+ * pushing received packets to the RX queue.
+ */
+void LORARADIO_vRxTask(void *parameters);
+
+/**
+ * @brief LoRa Radio RX FreeRTOS Task.
+ * This task manages the low-level LoRa hardware reception communication,
+ * sending packets from the TX queue.
+ */
+void LORARADIO_vTxTask(void *parameters);
+
+
 // These functions would interact with your specific LoRa transceiver hardware.
-// They are called by vLoRaTransceiverTask.
 
 /**
  * @brief Low-level LoRa hardware initialization.
  */
-void LoraRadio_HwInit(void);
+void LORARADIO_vRadioHWInit(void);
 
 /**
  * @brief Low-level function to send a packet via LoRa.
@@ -70,24 +76,46 @@ void LoraRadio_HwInit(void);
  * @param len Length of the data.
  * @return true on successful transmission, false otherwise.
  */
-bool LoraRadio_HwSend(const uint8_t *data, uint16_t len);
+bool LORARADIO_bRadioHWTx(uint8_t *payload, uint8_t payload_length);
+
+/**
+ * @brief Low-level function to check for received packet and get its info.
+ * This would typically be called by a vLoRaTransceiverTask in a polling loop,
+ * or triggered by an interrupt.
+ * @param LoraRadio_Packet_t Pointer to a struct that contains the
+ * Lora packet parameters.
+ */
+bool LORARADIO_bRadioHWRx(LoraRadio_Packet_t * rxParams);
 
 /**
  * @brief Low-level function to set LoRa module to receive mode.
  */
-void LORARADIO_vEnterRxMode(uint32_t u32RxTimeout);
+void LORARADIO_vEnterHWRxMode(uint32_t u32RxTimeout);
 
 /**
- * @brief Low-level function to check for received packet and get its info.
- * This would typically be called by the vLoRaTransceiverTask in a polling loop,
- * or triggered by an interrupt.
- * @param data_buffer Pointer to a buffer to copy received data into.
- * @param max_len Maximum length of the data_buffer.
- * @param actual_len Pointer to store the actual length of the received data.
- * @param rssi Pointer to store the RSSI of the received packet.
- * @param snr Pointer to store the SNR of the received packet.
- * @return true if a packet was received, false otherwise.
+ * @brief The function return the Lora device's unique ID
  */
-bool LoraRadio_HwReceive(uint8_t *data_buffer, uint16_t max_len, uint16_t *actual_len, int16_t *rssi, int8_t *snr);
+uint32_t LORARADIO_u32GetUniqueId (void);
+
+/**
+  * @brief  Process the RX Done event
+  * @param  fsm pointer to FSM context
+  * @retval None
+  */
+void LORARADIO_vEventRxDone(void);
+
+/**
+  * @brief  Process the TX Done event
+  * @param  fsm pointer to FSM context
+  * @retval None
+  */
+void LORARADIO_vEventTxDone(void);
+
+/**
+  * @brief  Receive data trough SUBGHZSPI peripheral
+  * @param  radioIrq  interrupt pending status information
+  * @retval None
+  */
+void LORARADIO_vRadioOnDioIrq(RadioIrqMasks_t radioIrq);
 
 #endif /* DEVICE_LORARADIO_LORARADIO_H_ */
