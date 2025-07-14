@@ -22,9 +22,10 @@ message MeshNeighborInfo {
 message MeshDReqPacket {
 
     MeshPacketHeader Header = 1;
-    uint32 Ttl = 2;
-    int32 Rssi = 3;
-    int32 Snr = 4;
+    uint32 OGDreqSenderID = 2;
+    uint32 Ttl = 3;
+    int32 Rssi = 4;
+    int32 Snr = 5;
 
 }
 

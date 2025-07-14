@@ -49,7 +49,17 @@ typedef struct {
  * @brief Initializes the Mesh Network layer.
  * Creates FreeRTOS resources and the Mesh Network task.
  */
-void MeshNetwork_init(void);
+void MESHNETWORK_vInit(void);
+
+/**
+ * @brief Encodes the DReq message into a protobuf buffer..
+ */
+bool MESHNETWORK_bEncodeDReqMessage(MeshDReqPacket * pMeshDReqPacket, uint8_t * buffer, uint16_t buffer_length, uint8_t * message_length);
+
+/**
+ * @brief Encodes the DRep message into a protobuf buffer..
+ */
+bool MESHNETWORK_bEncodeDRepMessage(MeshDRepPacket * pMeshDRepPacket, uint8_t * buffer, uint16_t buffer_length, uint8_t * message_length);
 
 /**
  * @brief Initiates a new discovery round.
@@ -58,7 +68,7 @@ void MeshNetwork_init(void);
  * @param original_dreq_sender_id The ID of the device initiating the DReq.
  * @return true if the DReq initiation event was successfully sent, false otherwise.
  */
-bool MeshNetwork_start_discovery_round(uint32_t dreq_id, uint16_t original_dreq_sender_id);
+bool MESHNETWORK_bStartDiscoveryRound(uint32_t dreq_id, uint16_t original_dreq_sender_id);
 
 
 /**
@@ -69,19 +79,28 @@ bool MeshNetwork_start_discovery_round(uint32_t dreq_id, uint16_t original_dreq_
  * @param actual_entries Pointer to store the actual number of entries copied.
  * @return true if neighbors were retrieved, false if buffer is too small or no neighbors.
  */
-bool MeshNetwork_get_discovered_neighbors(MeshDiscoveredNeighbor_t *buffer, uint16_t max_entries, uint16_t *actual_entries);
+bool MESHNETWORK_bGetDiscoveredNeighbors(MeshDiscoveredNeighbor_t *buffer, uint16_t max_entries, uint16_t *actual_entries);
 
 /**
  * @brief Clears the internal discovered neighbors cache.
  * Should be called by the application layer before a new discovery round if desired.
  */
-void MeshNetwork_clear_discovered_neighbors(void);
+void MESHNETWORK_vClearDiscoveredNeighbors(void);
 
 /**
- * @brief FreeRTOS Task for the Mesh Network layer.
- * Handles DReq processing, DRep generation, and prioritized relaying.
+ * @brief FreeRTOS Task for handling parsed DReq and DRep packets.
  */
-void vMeshNetworkTask(void *pvParameters);
+void MESHNETWORK_vMeshRxEventTask(void *pvParameters); // Renamed from vMeshNetworkTask
+
+/**
+ * @brief FreeRTOS Task for managing DReq initiation and DRep relaying scheduling.
+ */
+void MESHNETWORK_vReplySchedulerTask(void *pvParameters);
+
+/**
+ * @brief FreeRTOS Task for parsing raw LoRa packets into mesh-specific types.
+ */
+void MESHNETWORK_vParserTask(void *pvParameters);
 
 // --- FREE_RTOS TIMER PROTOTYPES ---
 void MESHNETWORK_vReplyTimerCallback(TimerHandle_t xTimer);

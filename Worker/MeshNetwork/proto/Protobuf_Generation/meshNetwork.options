@@ -39,6 +39,6 @@ MeshDReqPacket.Snr							    int_size:IS_8
 MeshDRepPacket.NeighborCount                    int_size:IS_8
 MeshDRepPacket.crc                              int_size:IS_8
 
-CDREPMessage.NeighborList						max_count:16
+MeshDRepPacket.NeighborList						max_count:16
 
 
