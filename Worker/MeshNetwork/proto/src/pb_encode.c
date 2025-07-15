@@ -3,9 +3,9 @@
  * 2011 Petteri Aimonen <jpa@kapsi.fi>
  */
 
-#include <MeshNetwork/proto/inc/pb.h>
-#include <MeshNetwork/proto/inc/pb_common.h>
-#include <MeshNetwork/proto/inc/pb_encode.h>
+#include <pb.h>
+#include <pb_common.h>
+#include <pb_encode.h>
 
 /* Use the GCC warn_unused_result attribute to check that all return values
  * are propagated correctly. On other compilers and gcc before 3.4.0 just

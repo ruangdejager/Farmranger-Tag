@@ -13,9 +13,9 @@
     #define checkreturn __attribute__((warn_unused_result))
 #endif
 
-#include <MeshNetwork/proto/inc/pb.h>
-#include <MeshNetwork/proto/inc/pb_decode.h>
-#include <MeshNetwork/proto/inc/pb_common.h>
+#include <pb.h>
+#include <pb_decode.h>
+#include <pb_common.h>
 
 /**************************************
  * Declarations internal to this file *

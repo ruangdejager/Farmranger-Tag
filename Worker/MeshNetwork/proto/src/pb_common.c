@@ -3,8 +3,8 @@
  * 2014 Petteri Aimonen <jpa@kapsi.fi>
  */
 
-#include <MeshNetwork/proto/inc/pb.h>
-#include <MeshNetwork/proto/inc/pb_common.h>
+#include <pb.h>
+#include <pb_common.h>
 
 bool pb_field_iter_begin(pb_field_iter_t *iter, const pb_field_t *fields, void *dest_struct)
 {

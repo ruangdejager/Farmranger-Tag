@@ -8,10 +8,6 @@
 
 #include "MeshNetwork.h"
 #include "LoraRadio.h" // Interface to the LoRa radio driver
-#include "FreeRTOS.h"
-#include "task.h"
-#include "queue.h"
-#include "semphr.h"
 #include <string.h> // For memcpy, memset
 #include <stdio.h>  // For DBG (for debugging)
 #include <stdlib.h> // For rand()
@@ -23,8 +19,6 @@
 #include "stdlib.h"
 
 #include "dbg_log.h"
-
-uint32_t MESH_DEVICE_ID; // This is unique to the radio and can be retrieve from the device layer
 
 // --- PRIVATE DEFINES ---
 #define MESH_RX_PARSER_TASK_PRIORITY    (configMAX_PRIORITIES - 2)
@@ -265,7 +259,7 @@ void MESHNETWORK_vReplySchedulerTask(void *pvParameters) {
 		if ((uxBits & MESH_REPLY_SCHEDULE_BIT) != 0 || uxQueueMessagesWaiting(xMeshNetworkInitDReqQueue) > 0) {
 			if (xQueueReceive(xMeshNetworkInitDReqQueue, &init_event, 0) == pdPASS) { // Non-blocking read
 				// This is the primary device initiating a DReq flood
-				MESHNETWORK_vSendDReq(init_event.DReqID, MESH_DEVICE_ID, MESH_MAX_TTL);
+				MESHNETWORK_vSendDReq(init_event.DReqID, LORARADIO_u32GetUniqueId(), MESH_MAX_TTL);
 				DBG("MeshReplyScheduler: Initiated DReq flood from primary device.\r\n");
 			}
 		}
@@ -340,7 +334,8 @@ void MESHNETWORK_vParserTask(void *pvParameters) {
 				// Clear struct for PB request msg
 				memset(&tMeshDReqPacket, 0, sizeof(MeshDReqPacket));
 				pb_decode(&PbInputStream, MeshDReqPacket_fields, &tMeshDReqPacket);
-				DBG("Received DREQ\r\n");
+				tMeshDReqPacket.Rssi = rx_packet.rssi;
+				tMeshDReqPacket.Snr = rx_packet.snr;
 
 				if (xQueueSend(xMeshNetworkDReqQueue, &tMeshDReqPacket, pdMS_TO_TICKS(100)) != pdPASS) {
 					// Handle send failure (rare with portMAX_DELAY)
@@ -352,7 +347,6 @@ void MESHNETWORK_vParserTask(void *pvParameters) {
 				memset(&tMeshDRepPacket, 0, sizeof(MeshDRepPacket));
 				// If not we check if it is a DREP Message (Discovery reply)
 				pb_decode(&PbInputStream, MeshDRepPacket_fields, &tMeshDRepPacket);
-				DBG("Received CDRep\r\n");
 
 				if (xQueueSend(xMeshNetworkDRepQueue, &tMeshDRepPacket, pdMS_TO_TICKS(100)) != pdPASS) {
 					// Handle send failure (rare with portMAX_DELAY)
@@ -588,11 +582,12 @@ static void MESHNETWORK_vHandleDReq(const MeshDReqPacket *dreq_packet) {
 			CurrentDiscoveryCache.tScheduledReplyTime = CurrentDiscoveryCache.tDReqReceivedTime +
 															  MESHNETWORK_tCalculateReplyDelay(CurrentDiscoveryCache.u8MyHopCountToDReqSender);
 
-			DBG("MeshNetwork: DReq from %u (hop %u, RSSI %d, SNR %d), new preferred parent. Scheduled reply at %lu\r\n",
+			DBG("MeshNetwork: DReq from %u (hop %u, RSSI %d, SNR %d), new preferred parent.\r\n",
 				   dreq_packet->Header.senderID, CurrentDiscoveryCache.u8MyHopCountToDReqSender,
-				   dreq_packet->Rssi, dreq_packet->Snr, CurrentDiscoveryCache.tScheduledReplyTime);
+				   dreq_packet->Rssi, dreq_packet->Snr);
+			DBG("Scheduled reply at %lu\r\n", CurrentDiscoveryCache.tScheduledReplyTime);
 
-			// NEW: Start/Reset the software timer to trigger at my_reply_scheduled_time
+			// Start/Reset the software timer to trigger at my_reply_scheduled_time
 			// Calculate delay from current tick count to scheduled time.
 			TickType_t current_ticks = xTaskGetTickCount();
 			TickType_t delay_ticks = 0;
@@ -777,8 +772,9 @@ static void MESHNETWORK_vSendDRep(void) {
         MESHNETWORK_bEncodeDRepMessage(pMeshDRepPacket, tx_packet.buffer, sizeof(tx_packet.buffer), &tx_packet.length);
 
         if (LORARADIO_bTxPacket(&tx_packet)) { // Assuming LORA_TX_QUEUE_TIMEOUT_MS is defined somewhere.
-            DBG("MeshNetwork: Sending DRep to parent %u with %u neighbors. Current time: %lu. Next scheduled reply (if any): %lu\r\n",
-                   pMeshDRepPacket->ParentID, pMeshDRepPacket->NeighborCount, xTaskGetTickCount(), CurrentDiscoveryCache.tScheduledReplyTime);
+            DBG("MeshNetwork: Sending DRep to parent %u with %u neighbors. Current time: %lu.\r\n",
+                   pMeshDRepPacket->ParentID, pMeshDRepPacket->NeighborCount, xTaskGetTickCount());
+            DBG("Next scheduled reply (if any): %lu\r\n", CurrentDiscoveryCache.tScheduledReplyTime);
             // Stop the timer after successfully sending the DRep
             xTimerStop(xMeshReplySchedulerTimer, 0);
         } else {

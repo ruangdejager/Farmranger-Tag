@@ -20,7 +20,7 @@
 typedef struct {
     uint8_t buffer[128];
     uint8_t length;
-    int8_t rssi;                                //!< The RSSI of the last packet
+    int16_t rssi;                                //!< The RSSI of the last packet
     int8_t snr;                                 //!< The SNR of the last packet
 } LoraRadio_Packet_t;
 
@@ -62,36 +62,6 @@ void LORARADIO_vRxTask(void *parameters);
  */
 void LORARADIO_vTxTask(void *parameters);
 
-
-// These functions would interact with your specific LoRa transceiver hardware.
-
-/**
- * @brief Low-level LoRa hardware initialization.
- */
-void LORARADIO_vRadioHWInit(void);
-
-/**
- * @brief Low-level function to send a packet via LoRa.
- * @param data Pointer to the data buffer.
- * @param len Length of the data.
- * @return true on successful transmission, false otherwise.
- */
-bool LORARADIO_bRadioHWTx(uint8_t *payload, uint8_t payload_length);
-
-/**
- * @brief Low-level function to check for received packet and get its info.
- * This would typically be called by a vLoRaTransceiverTask in a polling loop,
- * or triggered by an interrupt.
- * @param LoraRadio_Packet_t Pointer to a struct that contains the
- * Lora packet parameters.
- */
-bool LORARADIO_bRadioHWRx(LoraRadio_Packet_t * rxParams);
-
-/**
- * @brief Low-level function to set LoRa module to receive mode.
- */
-void LORARADIO_vEnterHWRxMode(uint32_t u32RxTimeout);
-
 /**
  * @brief The function return the Lora device's unique ID
  */
@@ -110,12 +80,5 @@ void LORARADIO_vEventRxDone(void);
   * @retval None
   */
 void LORARADIO_vEventTxDone(void);
-
-/**
-  * @brief  Receive data trough SUBGHZSPI peripheral
-  * @param  radioIrq  interrupt pending status information
-  * @retval None
-  */
-void LORARADIO_vRadioOnDioIrq(RadioIrqMasks_t radioIrq);
 
 #endif /* DEVICE_LORARADIO_LORARADIO_H_ */
