@@ -78,7 +78,7 @@ typedef enum {
 // Queue for initiating DReq from application layer (send to reply scheduler task)
 typedef struct {
     uint32_t DReqID;
-    uint16_t OGDReqSenderID;
+    uint32_t OGDReqSenderID;
 } MeshInitDReqEvent_t;
 
 static QueueHandle_t xMeshNetworkInitDReqQueue;
@@ -95,13 +95,12 @@ static TimerHandle_t xMeshReplySchedulerTimer;
 #define MESH_REPLY_TIMER_BIT (1UL << 1UL) // New event bit for timer expiration
 
 // --- PRIVATE FUNCTION PROTOTYPES ---
-static uint8_t MESHNETWORK_u8CRC8_Calculate(const uint8_t *data, uint16_t len);
-static void MESHNETWORK_vAddOrUpdateGlobalNeighbor(uint16_t device_id, uint8_t hop_count, int16_t rssi, int8_t snr);
-static void MESHNETWORK_vAddOrUpdateLocalCache(uint16_t device_id, uint8_t hop_count, int16_t rssi, int8_t snr);
+static void MESHNETWORK_vAddOrUpdateGlobalNeighbor(uint32_t device_id, uint8_t hop_count, int16_t rssi, int8_t snr);
+static void MESHNETWORK_vAddOrUpdateLocalCache(uint32_t device_id, uint8_t hop_count, int16_t rssi, int8_t snr);
 static TickType_t MESHNETWORK_tCalculateReplyDelay(uint8_t my_hop_count_to_dreq_sender);
 static void MESHNETWORK_vHandleDReq(const MeshDReqPacket *dreq_packet);
 static void MESHNETWORK_vHandleDRep(const MeshDRepPacket *drep_packet);
-static void MESHNETWORK_vSendDReq(uint32_t dreq_id, uint16_t sender_id, uint8_t ttl);
+static void MESHNETWORK_vSendDReq(uint32_t dreq_id, uint32_t sender_id, uint8_t ttl);
 static void MESHNETWORK_vSendDRep(void);
 
 
@@ -201,7 +200,7 @@ bool MESHNETWORK_bEncodeDRepMessage(MeshDRepPacket * pMeshDRepPacket, uint8_t * 
     PbOutputStream = pb_ostream_from_buffer(&buffer[1], buffer_length-1);
 
 	// Encode msg
-	if (!pb_encode(&PbOutputStream, MeshDReqPacket_fields , pMeshDRepPacket))
+	if (!pb_encode(&PbOutputStream, MeshDRepPacket_fields , pMeshDRepPacket))
 	{
 		return false;
 	}
@@ -216,28 +215,39 @@ void MESHNETWORK_vMeshRxEventTask(void *pvParameters) {
     (void)pvParameters;
 
     for (;;) {
-
-    	QueueSetMemberHandle_t activeQueue = xQueueSelectFromSet(xMeshNetworkEventQueueSet, portMAX_DELAY);
+        QueueSetMemberHandle_t activeQueue = xQueueSelectFromSet(xMeshNetworkEventQueueSet, portMAX_DELAY);
 
         if (activeQueue == xMeshNetworkDReqQueue)
         {
-        	MeshDReqPacket tMeshDReqPacket;
+            MeshDReqPacket tMeshDReqPacket;
             xQueueReceive(xMeshNetworkDReqQueue, &tMeshDReqPacket, 0);  // Always 0 timeout after select
-            MESHNETWORK_vHandleDReq(&tMeshDReqPacket);
-            // Signal the reply scheduler to re-evaluate its state after processing a DReq
-            xEventGroupSetBits(xMeshReplySchedulerEventGroup, MESH_REPLY_SCHEDULE_BIT);
+
+            // Check if this DReq was originally sent by THIS device.
+            // If the Original DReq Sender ID in the packet matches this device's unique ID,
+            // then it's our own DReq being relayed back.
+            if (tMeshDReqPacket.OGDreqSenderID == LORARADIO_u32GetUniqueId()) {
+                DBG("MeshNetwork: Received own DReq (ID: %lu, Sender: %u), ignoring.\r\n",
+                        tMeshDReqPacket.Header.dReqID, tMeshDReqPacket.OGDreqSenderID);
+                // No further processing for this DReq if it's our own
+            } else {
+                // If it's NOT our own DReq, then handle it normally:
+                // 1. Evaluate if it's a new DReq round or offers a better path.
+                // 2. Schedule a DRep reply based on hop count.
+                // 3. Potentially re-broadcast the DReq.
+                MESHNETWORK_vHandleDReq(&tMeshDReqPacket);
+                // Signal the reply scheduler to re-evaluate its state after processing a DReq
+                xEventGroupSetBits(xMeshReplySchedulerEventGroup, MESH_REPLY_SCHEDULE_BIT);
+            }
         }
         else if (activeQueue == xMeshNetworkDRepQueue)
         {
-        	MeshDRepPacket tMeshDRepPacket;
+            MeshDRepPacket tMeshDRepPacket;
             xQueueReceive(xMeshNetworkDRepQueue, &tMeshDRepPacket, 0);  // Always 0 timeout after select
             MESHNETWORK_vHandleDRep(&tMeshDRepPacket);
         }
-
     }
 
     vTaskDelete(NULL);
-
 }
 
 void MESHNETWORK_vReplySchedulerTask(void *pvParameters) {
@@ -437,11 +447,12 @@ void MESHNETWORK_vReplyTimerCallback(TimerHandle_t xTimer) {
     DBG("MeshReplyTimer: Timer expired, signaling scheduler.\r\n");
 }
 
-bool MESHNETWORK_bStartDiscoveryRound(uint32_t dreq_id, uint16_t original_dreq_sender_id) {
+bool MESHNETWORK_bStartDiscoveryRound(uint32_t dreq_id, uint32_t original_dreq_sender_id) {
     MeshInitDReqEvent_t event;
     event.DReqID = dreq_id;
     event.OGDReqSenderID = original_dreq_sender_id;
 
+    DBG("\r\n--------\r\nCount: %d\r\n--------\r\n", CurrentDiscoveryCache.u8LocalDiscoveredDevicesCount);
     // Set up the cache for the primary device's own DReq
     // This part is critical as it sets up the initial state for the reply scheduler.
     memset(&CurrentDiscoveryCache, 0, sizeof(DiscoveryCache_t));
@@ -489,15 +500,7 @@ void MESHNETWORK_vClearDiscoveredNeighbors(void) {
 
 // --- PRIVATE HELPER FUNCTIONS ---
 
-static uint8_t MESHNETWORK_u8CRC8_Calculate(const uint8_t *data, uint16_t len) {
-    uint8_t crc = 0x00;
-    for (uint16_t i = 0; i < len; i++) {
-        crc ^= data[i];
-    }
-    return crc;
-}
-
-static void MESHNETWORK_vAddOrUpdateGlobalNeighbor(uint16_t device_id, uint8_t hop_count, int16_t rssi, int8_t snr) {
+static void MESHNETWORK_vAddOrUpdateGlobalNeighbor(uint32_t device_id, uint8_t hop_count, int16_t rssi, int8_t snr) {
     if (xSemaphoreTake(xMeshNeighborTableMutex, portMAX_DELAY) == pdTRUE) {
         bool found = false;
         for (uint16_t i = 0; i < u8MeshDiscoveredNeighborsCount; i++) {
@@ -526,7 +529,7 @@ static void MESHNETWORK_vAddOrUpdateGlobalNeighbor(uint16_t device_id, uint8_t h
     }
 }
 
-static void MESHNETWORK_vAddOrUpdateLocalCache(uint16_t device_id, uint8_t hop_count, int16_t rssi, int8_t snr) {
+static void MESHNETWORK_vAddOrUpdateLocalCache(uint32_t device_id, uint8_t hop_count, int16_t rssi, int8_t snr) {
     bool found = false;
     for (uint8_t i = 0; i < CurrentDiscoveryCache.u8LocalDiscoveredDevicesCount; i++) {
         if (CurrentDiscoveryCache.tLocalDiscoveredDevices[i].u32DeviceID == device_id) {
@@ -618,16 +621,6 @@ static void MESHNETWORK_vHandleDReq(const MeshDReqPacket *dreq_packet) {
 }
 
 static void MESHNETWORK_vHandleDRep(const MeshDRepPacket *drep_packet) {
-    // Verify CRC (excluding the CRC byte itself)
-    uint16_t packet_base_len = sizeof(MeshDRepPacket) - sizeof(MeshNeighborInfo);
-    uint16_t total_payload_len = packet_base_len + (drep_packet->NeighborCount * sizeof(MeshNeighborInfo));
-
-    uint8_t calculated_crc = MESHNETWORK_u8CRC8_Calculate((uint8_t*)drep_packet, total_payload_len);
-    if (calculated_crc != drep_packet->crc) {
-        DBG("MeshNetwork: DRep from %u, CRC Mismatch! Calculated: 0x%02X, Received: 0x%02X\r\n",
-               drep_packet->Header.senderID, calculated_crc, drep_packet->crc);
-        return;
-    }
 
     // Only process DRep for the current discovery round
     if (drep_packet->Header.dReqID != CurrentDiscoveryCache.u32DReqID ||
@@ -673,9 +666,10 @@ static void MESHNETWORK_vHandleDRep(const MeshDRepPacket *drep_packet) {
         DBG("MeshNetwork: Ignored DRep from %u (parent %u, current parent %u).\r\n",
                drep_packet->Header.senderID, drep_packet->ParentID, CurrentDiscoveryCache.u32PreferredParentID);
     }
+
 }
 
-static void MESHNETWORK_vSendDReq(uint32_t dreq_id, uint16_t sender_id, uint8_t ttl) {
+static void MESHNETWORK_vSendDReq(uint32_t dreq_id, uint32_t sender_id, uint8_t ttl) {
 
 	MeshDReqPacket meshDReqPacket;
 	meshDReqPacket.Header.packetType = MeshPacketType_MESH_PACKET_TYPE_DREQ;
@@ -763,10 +757,6 @@ static void MESHNETWORK_vSendDRep(void) {
     pMeshDRepPacket->NeighborCount = neighbors_added;
 
     if (neighbors_added > 0) {
-        // Calculate CRC
-        uint16_t packet_base_len = sizeof(MeshDRepPacket) - sizeof(MeshNeighborInfo); // Header + parent_id + num_neighbors
-        uint16_t total_packet_len = packet_base_len + (neighbors_added * sizeof(MeshNeighborInfo));
-        pMeshDRepPacket->crc = MESHNETWORK_u8CRC8_Calculate((uint8_t*)pMeshDRepPacket, total_packet_len); // CRC covers up to num_neighbors * data
 
         LoraRadio_Packet_t tx_packet;
         MESHNETWORK_bEncodeDRepMessage(pMeshDRepPacket, tx_packet.buffer, sizeof(tx_packet.buffer), &tx_packet.length);

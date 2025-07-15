@@ -24,7 +24,7 @@
 #define MESH_MAX_NEIGHBORS_PER_PACKET			5
 #define MESH_MAX_LOCAL_DISCOVERED_DEVICES		16
 #define MESH_BASE_HOP_DELAY_MS					100
-#define MESH_REPLY_JITTER_WINDOW_MS				500
+#define MESH_REPLY_JITTER_WINDOW_MS				1000
 #define MESH_DREQ_FLOOD_DELAY_MS				10000
 
 // --- PACKET STRUCTURES (Common to the mesh protocol) ---
@@ -68,7 +68,7 @@ bool MESHNETWORK_bEncodeDRepMessage(MeshDRepPacket * pMeshDRepPacket, uint8_t * 
  * @param original_dreq_sender_id The ID of the device initiating the DReq.
  * @return true if the DReq initiation event was successfully sent, false otherwise.
  */
-bool MESHNETWORK_bStartDiscoveryRound(uint32_t dreq_id, uint16_t original_dreq_sender_id);
+bool MESHNETWORK_bStartDiscoveryRound(uint32_t dreq_id, uint32_t original_dreq_sender_id);
 
 
 /**

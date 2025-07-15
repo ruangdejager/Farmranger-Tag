@@ -36,7 +36,6 @@ message MeshDRepPacket {
     uint32 ParentID = 3;
     uint32 NeighborCount = 4;
     repeated MeshNeighborInfo NeighborList = 5;
-    uint32 crc = 6;
 
 }
 

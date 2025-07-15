@@ -30,6 +30,10 @@ TaskHandle_t LORARADIO_vTxTask_handle;
 // --- LOCAL VARIABLE DEFINES ---
 static uint8_t u8DevEUI[8];
 
+// --- PRIVATE FUNCTION PROTOTYPES ---
+
+static uint8_t LORARADIO_u8CRC8_Calculate(const uint8_t *data, uint16_t len);
+
 // --- PUBLIC FUNCTIONS ---
 
 void LORARADIO_vInit(void) {
@@ -62,14 +66,14 @@ void LORARADIO_vInit(void) {
 
 // Function that exposes a read from the rx queue
 bool LORARADIO_bRxPacket(LoraRadio_Packet_t * packet) {
-    return xQueueReceive(xLoRaRxQueue, packet, pdMS_TO_TICKS(100)) == pdPASS;
+    return xQueueReceive(xLoRaRxQueue, packet, portMAX_DELAY) == pdPASS;
 }
 // Function that exposes a push to the tx queue
 bool LORARADIO_bTxPacket(LoraRadio_Packet_t * packet) {
     if (packet->length > LORA_MAX_PACKET_SIZE) {
         return false;
     }
-    if (xQueueSend(xLoRaTxQueue, packet, pdMS_TO_TICKS(100)) == pdPASS) {
+    if (xQueueSend(xLoRaTxQueue, packet, portMAX_DELAY) == pdPASS) {
         return true;
     }
     return false;
@@ -97,6 +101,18 @@ void LORARADIO_vRxTask(void *parameters)
 		memset(&rx_packet, 0, sizeof(LoraRadio_Packet_t));
 		LORARADIO_DRIVER_bReceivePayload(&rx_packet);
 
+	    uint8_t received_crc = rx_packet.buffer[rx_packet.length-1];
+	    uint8_t calculated_crc = LORARADIO_u8CRC8_Calculate((uint8_t*)rx_packet.buffer, rx_packet.length-1);
+
+	    if (calculated_crc != received_crc) {
+	        DBG("LoraRadio: CRC Mismatch! Calculated: 0x%02X, Received: 0x%02X\r\n",
+	               calculated_crc, received_crc);
+	        // Re-enter RX before continuing
+	    	LORARADIO_DRIVER_vEnterRxMode(0x00);
+	        continue;
+	    }
+	    // Decrement packet length to remove crc index
+	    rx_packet.length--;
     	if (xQueueSend(xLoRaRxQueue, &rx_packet, pdMS_TO_TICKS(100)) != pdPASS) {
     	    // handle send failure
     		// Maybe keep track of a bitmasked error code
@@ -105,7 +121,6 @@ void LORARADIO_vRxTask(void *parameters)
     	}
 
     	// Now we re-enter RX listening mode
-    	DBG("Entering RX\r\n");
     	LORARADIO_DRIVER_vEnterRxMode(0x00);
 
 	}
@@ -124,17 +139,17 @@ void LORARADIO_vTxTask(void *parameters)
 		if (xQueueReceive(xLoRaTxQueue, &tx_packet, portMAX_DELAY) == pdPASS)
 		{
 
-			vTaskDelay(pdMS_TO_TICKS(100));
-
-			if (LORARADIO_DRIVER_bTransmitPayload(tx_packet.buffer, tx_packet.length))
+			uint8_t calculated_crc = LORARADIO_u8CRC8_Calculate((uint8_t*)tx_packet.buffer, tx_packet.length);
+			tx_packet.buffer[tx_packet.length] = calculated_crc;
+			if (LORARADIO_DRIVER_bTransmitPayload(tx_packet.buffer, tx_packet.length+1))
 			{
 				// We got the TX_DONE interrupt and the TX was successful
-				DBG("TX IRQ\r\n");
+				DBG("TX IRQ: len=%d\r\n", tx_packet.length);
 			} else {
+				DBG("LoraRAdio: Failed to transmit payload");
 				// No TX_DONE interrupt, the freertos notification timeout triggered
 			}
 
-			DBG("Entering RX\r\n");
 			LORARADIO_DRIVER_vEnterRxMode(0x00);
 
 		}
@@ -173,4 +188,12 @@ void LORARADIO_vEventTxDone(void)
 	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 	vTaskNotifyGiveFromISR(LORARADIO_vTxTask_handle, &xHigherPriorityTaskWoken);
 	portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+static uint8_t LORARADIO_u8CRC8_Calculate(const uint8_t *data, uint16_t len) {
+    uint8_t crc = 0x00;
+    for (uint16_t i = 0; i < len; i++) {
+        crc ^= data[i];
+    }
+    return crc;
 }

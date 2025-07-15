@@ -18,7 +18,7 @@
 
 // Structure for a raw LoRa packet (used for both TX and RX)
 typedef struct {
-    uint8_t buffer[128];
+    uint8_t buffer[LORA_MAX_PACKET_SIZE];
     uint8_t length;
     int16_t rssi;                                //!< The RSSI of the last packet
     int8_t snr;                                 //!< The SNR of the last packet
