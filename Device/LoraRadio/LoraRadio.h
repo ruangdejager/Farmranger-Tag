@@ -81,4 +81,14 @@ void LORARADIO_vEventRxDone(void);
   */
 void LORARADIO_vEventTxDone(void);
 
+void LORARADIO_vEventCADDetected(void);
+
+void LORARADIO_vEventCADClear(void);
+
+uint32_t LORARADIO_u32GetRandomNumber(uint32_t max_value);
+
+bool LORARADIO_bCarrierSense(void);
+
+bool LORARADIO_bCarrierSenseAndWait(uint32_t maxWaitMs);
+
 #endif /* DEVICE_LORARADIO_LORARADIO_H_ */

@@ -8,6 +8,8 @@
 #include "LoraRadio.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <limits.h>
 
 #include "LoraRadio_Driver.h"
 #include "dbg_log.h"
@@ -19,6 +21,10 @@
 #define LORA_TASK_STACK_SIZE    (configMINIMAL_STACK_SIZE * 4)
 #define LORA_POLLING_DELAY_MS   (10) // Delay for polling RX in transceiver task
 
+#define CAD_CLEAR_BIT   (1 << 0)
+#define CAD_BUSY_BIT    (1 << 1)
+
+
 // --- PRIVATE FREE_RTOS QUEUES ---
 static QueueHandle_t xLoRaTxQueue; // Queue for packets to be sent by LoraRadio_send_packet
 static QueueHandle_t xLoRaRxQueue; // Queue for raw received packets from LoraRadio_HwReceive
@@ -26,6 +32,9 @@ static QueueHandle_t xLoRaRxQueue; // Queue for raw received packets from LoraRa
 // --- PRIVATE FREE_RTOS TASK HANDLEs ---
 TaskHandle_t LORARADIO_vRxTask_handle;
 TaskHandle_t LORARADIO_vTxTask_handle;
+
+TaskHandle_t LORARADIO_vCarrierSenseTaskHandle = NULL; // Assigned when function called
+
 
 // --- LOCAL VARIABLE DEFINES ---
 static uint8_t u8DevEUI[8];
@@ -141,12 +150,20 @@ void LORARADIO_vTxTask(void *parameters)
 
 			uint8_t calculated_crc = LORARADIO_u8CRC8_Calculate((uint8_t*)tx_packet.buffer, tx_packet.length);
 			tx_packet.buffer[tx_packet.length] = calculated_crc;
+
+			if (!LORARADIO_bCarrierSenseAndWait(5000)) // 5 seconds max wait
+			{
+			    DBG("Abort TX: channel busy too long\r\n");
+			    LORARADIO_DRIVER_vEnterRxMode(0x00);
+			    continue; // Skip this packet
+			}
+
 			if (LORARADIO_DRIVER_bTransmitPayload(tx_packet.buffer, tx_packet.length+1))
 			{
 				// We got the TX_DONE interrupt and the TX was successful
 				DBG("TX IRQ: len=%d\r\n", tx_packet.length);
 			} else {
-				DBG("LoraRAdio: Failed to transmit payload");
+				DBG("LoraRadio: Failed to transmit payload\r\n");
 				// No TX_DONE interrupt, the freertos notification timeout triggered
 			}
 
@@ -190,6 +207,32 @@ void LORARADIO_vEventTxDone(void)
 	portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
+void LORARADIO_vEventCADDetected(void)
+{
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    if (LORARADIO_vCarrierSenseTaskHandle != NULL)
+    {
+        xTaskNotifyFromISR(LORARADIO_vCarrierSenseTaskHandle,
+                           CAD_BUSY_BIT,
+                           eSetBits,
+                           &xHigherPriorityTaskWoken);
+    }
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+void LORARADIO_vEventCADClear(void)
+{
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    if (LORARADIO_vCarrierSenseTaskHandle != NULL)
+    {
+        xTaskNotifyFromISR(LORARADIO_vCarrierSenseTaskHandle,
+                           CAD_CLEAR_BIT,
+                           eSetBits,
+                           &xHigherPriorityTaskWoken);
+    }
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
 static uint8_t LORARADIO_u8CRC8_Calculate(const uint8_t *data, uint16_t len) {
     uint8_t crc = 0x00;
     for (uint16_t i = 0; i < len; i++) {
@@ -197,3 +240,65 @@ static uint8_t LORARADIO_u8CRC8_Calculate(const uint8_t *data, uint16_t len) {
     }
     return crc;
 }
+
+uint32_t LORARADIO_u32GetRandomNumber(uint32_t max_value)
+{
+    return LORARADIO_DRIVER_u32GetRandomNumber(max_value);
+}
+
+/**
+  * @brief  Use CAD to monitor channel activity
+  * @param  void
+  * @retval True if channel is clean, false if the channel is busy
+  */
+bool LORARADIO_bCarrierSense(void)
+{
+    LORARADIO_vCarrierSenseTaskHandle = xTaskGetCurrentTaskHandle();
+
+    // Start CAD detection
+    LORARADIO_DRIVER_vEnterCAD();
+
+    uint32_t notifyValue = 0;
+
+    // Wait for IRQ to notify us (CAD_DONE or CAD_DETECTED)
+    if (xTaskNotifyWait(0, ULONG_MAX, &notifyValue, pdMS_TO_TICKS(1000)) == pdTRUE)
+    {
+        if (notifyValue & CAD_BUSY_BIT)
+        {
+            DBG("CAD: Channel busy\r\n");
+            return false;
+        }
+        else if (notifyValue & CAD_CLEAR_BIT)
+        {
+            DBG("CAD: Channel clear\r\n");
+            return true;
+        }
+    }
+
+    DBG("CAD: Timeout, assuming channel busy\r\n");
+    return false; // Fail safe if no response
+}
+
+
+bool LORARADIO_bCarrierSenseAndWait(uint32_t maxWaitMs)
+{
+    uint32_t startTick = xTaskGetTickCount();
+
+    while ((xTaskGetTickCount() - startTick) < pdMS_TO_TICKS(maxWaitMs))
+    {
+        if (LORARADIO_bCarrierSense())
+        {
+        	DBG("Channel clear\r\n");
+            return true; // Channel clear, proceed
+        }
+
+        // Channel busy, apply random backoff
+        uint16_t backoffMs = 200 + (rand() % 400); // random 200–600 ms
+        DBG("CAD busy, retrying after %d ms\r\n", backoffMs);
+        vTaskDelay(pdMS_TO_TICKS(backoffMs));
+    }
+
+    DBG("Carrier sense timed out after %lu ms\r\n", maxWaitMs);
+    return false; // Timeout reached
+}
+

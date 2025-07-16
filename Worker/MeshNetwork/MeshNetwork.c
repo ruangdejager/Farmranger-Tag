@@ -558,7 +558,7 @@ static void MESHNETWORK_vAddOrUpdateLocalCache(uint32_t device_id, uint8_t hop_c
 
 static TickType_t MESHNETWORK_tCalculateReplyDelay(uint8_t my_hop_count_to_dreq_sender) {
     TickType_t delay_ms = (TickType_t)my_hop_count_to_dreq_sender * MESH_BASE_HOP_DELAY_MS;
-    delay_ms += (rand() % MESH_REPLY_JITTER_WINDOW_MS); // Add random jitter
+    delay_ms += LORARADIO_u32GetRandomNumber(MESH_REPLY_JITTER_WINDOW_MS); // Add random jitter
     return delay_ms;
 }
 
