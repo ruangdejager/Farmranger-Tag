@@ -4,7 +4,6 @@ syntax = "proto3";
 
 message MeshPacketHeader {
 
-    MeshPacketType packetType = 1;
     uint32 senderID = 2;
     uint32 dReqID = 3;
 
@@ -34,8 +33,7 @@ message MeshDRepPacket {
     MeshPacketHeader Header = 1;
     uint32 OGDreqSenderID = 2;
     uint32 ParentID = 3;
-    uint32 NeighborCount = 4;
-    repeated MeshNeighborInfo NeighborList = 5;
+    repeated MeshNeighborInfo NeighborList = 4;
 
 }
 

@@ -36,8 +36,6 @@ MeshDReqPacket.Ttl							    int_size:IS_8
 MeshDReqPacket.Rssi							    int_size:IS_16
 MeshDReqPacket.Snr							    int_size:IS_8
 
-MeshDRepPacket.NeighborCount                    int_size:IS_8
-
 MeshDRepPacket.NeighborList						max_count:16
 
 
