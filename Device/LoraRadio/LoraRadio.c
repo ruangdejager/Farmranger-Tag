@@ -150,6 +150,7 @@ void LORARADIO_vTxTask(void *parameters)
 
 			uint8_t calculated_crc = LORARADIO_u8CRC8_Calculate((uint8_t*)tx_packet.buffer, tx_packet.length);
 			tx_packet.buffer[tx_packet.length] = calculated_crc;
+			tx_packet.length++;
 
 			if (!LORARADIO_bCarrierSenseAndWait(5000)) // 5 seconds max wait
 			{
@@ -158,7 +159,7 @@ void LORARADIO_vTxTask(void *parameters)
 			    continue; // Skip this packet
 			}
 
-			if (LORARADIO_DRIVER_bTransmitPayload(tx_packet.buffer, tx_packet.length+1))
+			if (LORARADIO_DRIVER_bTransmitPayload(tx_packet.buffer, tx_packet.length))
 			{
 				// We got the TX_DONE interrupt and the TX was successful
 				DBG("TX IRQ: len=%d\r\n", tx_packet.length);

@@ -16,6 +16,8 @@
 #define LORA_PREAMBLE_LENGTH                        8         /* Same for Tx and Rx */
 #define LORA_SYMBOL_TIMEOUT                         5         /* Symbols */
 
+#define LORA_SYNCWORD                         		0x1424         /* Symbols */
+
 // Max LoRa packet size (adjust based on your LoRa module's capabilities)
 #define LORA_MAX_PACKET_SIZE    (256)
 

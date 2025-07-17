@@ -175,8 +175,9 @@ bool MESHNETWORK_bEncodeDReqMessage(MeshDReqPacket * pMeshDReqPacket, uint8_t * 
     PbOutputStream = pb_ostream_from_buffer(&buffer[1], buffer_length-1);
 
 	// Encode msg
-	if (!pb_encode(&PbOutputStream, MeshDReqPacket_fields , pMeshDReqPacket))
+	if (!pb_encode(&PbOutputStream, MeshDReqPacket_fields, pMeshDReqPacket))
 	{
+		DBG("PB_ENCODE_ERROR_DREQ: %s\r\n", PB_GET_ERROR(&ostream));
 		return false;
 	}
 
@@ -343,7 +344,10 @@ void MESHNETWORK_vParserTask(void *pvParameters) {
 			{
 				// Clear struct for PB request msg
 				memset(&tMeshDReqPacket, 0, sizeof(MeshDReqPacket));
-				pb_decode(&PbInputStream, MeshDReqPacket_fields, &tMeshDReqPacket);
+				if(!pb_decode(&PbInputStream, MeshDReqPacket_fields, &tMeshDReqPacket))
+				{
+					DBG("--- PROTOBUF: PROBLEM DECODING DREQ ---\r\n");
+				}
 				tMeshDReqPacket.Rssi = rx_packet.rssi;
 				tMeshDReqPacket.Snr = rx_packet.snr;
 
@@ -356,7 +360,11 @@ void MESHNETWORK_vParserTask(void *pvParameters) {
 				// Clear struct for PB request msg
 				memset(&tMeshDRepPacket, 0, sizeof(MeshDRepPacket));
 				// If not we check if it is a DREP Message (Discovery reply)
-				pb_decode(&PbInputStream, MeshDRepPacket_fields, &tMeshDRepPacket);
+				if(!pb_decode(&PbInputStream, MeshDRepPacket_fields, &tMeshDRepPacket))
+				{
+					DBG("--- PROTOBUF: PROBLEM DECODING DREP ---\r\n");
+				}
+
 
 				if (xQueueSend(xMeshNetworkDRepQueue, &tMeshDRepPacket, pdMS_TO_TICKS(100)) != pdPASS) {
 					// Handle send failure (rare with portMAX_DELAY)
@@ -371,73 +379,6 @@ void MESHNETWORK_vParserTask(void *pvParameters) {
 
     vTaskDelete(NULL);
 }
-
-
-//void vMeshRxParserTask(void *pvParameters) {
-//    (void)pvParameters;
-//
-//    LoraRadio_Packet_t rx_packet;
-//
-//    for (;;) {
-//        // 1. Check for incoming raw LoRa packets from the LoraRadio layer
-//        if (LoraRadio_receive_packet(&rx_packet, portMAX_DELAY)) { // Wait indefinitely for a raw packet
-//            MeshPacketHeader_t *header = (MeshPacketHeader_t*)rx_packet.data;
-//
-//            if (rx_packet.len < sizeof(MeshPacketHeader_t)) {
-//                DBG("MeshRxParser: Packet too short for header, ignoring.\r\n");
-//                continue;
-//            }
-//
-//            if (header->packet_type == MESH_PACKET_TYPE_DREQ) {
-//                if (rx_packet.len < sizeof(MeshDiscoveryRequestPacket_t)) {
-//                    DBG("MeshRxParser: DReq packet too short, ignoring.\r\n");
-//                    continue;
-//                }
-//                MeshDiscoveryRequestPacket_t parsed_dreq;
-//                memcpy(&parsed_dreq, rx_packet.data, sizeof(MeshDiscoveryRequestPacket_t));
-//                parsed_dreq.rssi = rx_packet.rssi; // Pass RSSI/SNR from physical layer
-//                parsed_dreq.snr = rx_packet.snr;
-//
-//                if (xQueueSend(xMeshNetworkDReqQueue, &parsed_dreq, 0) != pdPASS) { // Non-blocking send
-//                    DBG("MeshRxParser: DReq queue full, DReq from %u dropped.\r\n", parsed_dreq.header.sender_id);
-//                } else {
-//                    DBG("MeshRxParser: Parsed DReq from %u, queued.\r\n", parsed_dreq.header.sender_id);
-//                }
-//            } else if (header->packet_type == MESH_PACKET_TYPE_DREP) {
-//                // Determine the full size of the DRep packet based on num_neighbors
-//                if (rx_packet.len < (sizeof(MeshDiscoveryReplyPacket_t) - sizeof(MeshNeighborInfo_t) + sizeof(uint8_t))) { // Min DRep size (header + parent_id + num_neighbors + CRC)
-//                     DBG("MeshRxParser: DRep packet too short for header/min payload, ignoring.\r\n");
-//                     continue;
-//                }
-//                uint8_t num_neighbors = ((MeshDiscoveryReplyPacket_t*)rx_packet.data)->num_neighbors;
-//                uint16_t expected_total_len = (sizeof(MeshDiscoveryReplyPacket_t) - sizeof(MeshNeighborInfo_t)) +
-//                                              (num_neighbors * sizeof(MeshNeighborInfo_t)) + sizeof(uint8_t); // +CRC
-//
-//                if (rx_packet.len < expected_total_len) {
-//                    DBG("MeshRxParser: DRep packet truncated, ignoring. Expected %u, got %u.\r\n", expected_total_len, rx_packet.len);
-//                    continue;
-//                }
-//
-//                // Allocate memory dynamically for the variable-sized DRep
-//                MeshDiscoveryReplyPacket_t *parsed_drep = (MeshDiscoveryReplyPacket_t*)pvPortMalloc(expected_total_len);
-//                if (parsed_drep == NULL) {
-//                    DBG("MeshRxParser: Failed to allocate memory for DRep, dropping.\r\n");
-//                    continue;
-//                }
-//                memcpy(parsed_drep, rx_packet.data, expected_total_len); // Copy the full packet
-//
-//                if (xQueueSend(xMeshNetworkDRepQueue, &parsed_drep, 0) != pdPASS) { // Non-blocking send of pointer
-//                    DBG("MeshRxParser: DRep queue full, DRep from %u dropped. Freeing memory.\r\n", parsed_drep->header.sender_id);
-//                    vPortFree(parsed_drep); // Free if not successfully queued
-//                } else {
-//                    DBG("MeshRxParser: Parsed DRep from %u, queued pointer.\r\n", parsed_drep->header.sender_id);
-//                }
-//            } else {
-//                DBG("MeshRxParser: Unknown packet type %u received from LoRaRadio.\r\n", header->packet_type);
-//            }
-//        }
-//    }
-//}
 
 
 void MESHNETWORK_vReplyTimerCallback(TimerHandle_t xTimer) {
@@ -633,7 +574,7 @@ static void MESHNETWORK_vHandleDRep(const MeshDRepPacket *drep_packet) {
     // If this DRep is for the original DReq sender (i.e., we are the primary device)
     if (LORARADIO_u32GetUniqueId() == CurrentDiscoveryCache.u32OGDreqSenderID) {
         // Add all reported neighbors to the global table
-        uint8_t num_entries = drep_packet->NeighborCount;
+        uint8_t num_entries = drep_packet->NeighborList_count;
         if (num_entries > MESH_MAX_NEIGHBORS_PER_PACKET) num_entries = MESH_MAX_NEIGHBORS_PER_PACKET; // Safety check
 
         for (uint8_t i = 0; i < num_entries; i++) {
@@ -643,14 +584,14 @@ static void MESHNETWORK_vHandleDRep(const MeshDRepPacket *drep_packet) {
                                                       drep_packet->NeighborList[i].snr);
         }
         DBG("MeshNetwork: Primary Device %u: Received DRep from %u, added %u neighbors.\r\n",
-        		LORARADIO_u32GetUniqueId(), drep_packet->Header.senderID, drep_packet->NeighborCount);
+        		LORARADIO_u32GetUniqueId(), drep_packet->Header.senderID, drep_packet->NeighborList_count);
     }
     // If we are an intermediate relay node and this DRep is from a downstream child
     else if (drep_packet->ParentID == LORARADIO_u32GetUniqueId()) {
         DBG("MeshNetwork: Received DRep from downstream %u, num_neighbors %u\r\n",
-               drep_packet->Header.senderID, drep_packet->NeighborCount);
+               drep_packet->Header.senderID, drep_packet->NeighborList_count);
         // Add all reported neighbors to our local cache for potential relaying
-        uint8_t num_entries = drep_packet->NeighborCount;
+        uint8_t num_entries = drep_packet->NeighborList_count;
         if (num_entries > MESH_MAX_NEIGHBORS_PER_PACKET) num_entries = MESH_MAX_NEIGHBORS_PER_PACKET; // Safety check
 
         for (uint8_t i = 0; i < num_entries; i++) {
@@ -672,7 +613,6 @@ static void MESHNETWORK_vHandleDRep(const MeshDRepPacket *drep_packet) {
 static void MESHNETWORK_vSendDReq(uint32_t dreq_id, uint32_t sender_id, uint8_t ttl) {
 
 	MeshDReqPacket meshDReqPacket;
-	meshDReqPacket.Header.packetType = MeshPacketType_MESH_PACKET_TYPE_DREQ;
 	meshDReqPacket.Header.senderID = sender_id;
 	meshDReqPacket.Header.dReqID = dreq_id;
 	meshDReqPacket.OGDreqSenderID = (sender_id == LORARADIO_u32GetUniqueId() &&
@@ -699,7 +639,10 @@ static void MESHNETWORK_vSendDReq(uint32_t dreq_id, uint32_t sender_id, uint8_t 
 	meshDReqPacket.Snr = 0;
 
     LoraRadio_Packet_t tx_packet;
-	MESHNETWORK_bEncodeDReqMessage(&meshDReqPacket, tx_packet.buffer, sizeof(tx_packet.buffer), &tx_packet.length);
+	if(!MESHNETWORK_bEncodeDReqMessage(&meshDReqPacket, tx_packet.buffer, sizeof(tx_packet.buffer), &tx_packet.length))
+	{
+		DBG("\r\n--- PROTOBUF: PROBLEM ENCODING DREQ ---\r\n");
+	}
 
     if (LORARADIO_bTxPacket(&tx_packet)) {
         DBG("MeshNetwork: Sent DReq ID %lu from %u, TTL %u.\r\n", dreq_id, sender_id, ttl);
@@ -718,7 +661,6 @@ static void MESHNETWORK_vSendDRep(void) {
     // Clear the allocated memory
     memset(pMeshDRepPacket, 0, sizeof(MeshDRepPacket) + (MESH_MAX_NEIGHBORS_PER_PACKET * sizeof(MeshNeighborInfo)));
 
-    pMeshDRepPacket->Header.packetType = MeshPacketType_MESH_PACKET_TYPE_DREP;
     pMeshDRepPacket->Header.senderID = LORARADIO_u32GetUniqueId();
     pMeshDRepPacket->Header.dReqID = CurrentDiscoveryCache.u32DReqID;
     pMeshDRepPacket->OGDreqSenderID = CurrentDiscoveryCache.u32OGDreqSenderID; // Added this field
@@ -754,16 +696,22 @@ static void MESHNETWORK_vSendDRep(void) {
             neighbors_added++;
         }
     }
-    pMeshDRepPacket->NeighborCount = neighbors_added;
+    pMeshDRepPacket->NeighborList_count = neighbors_added;
 
     if (neighbors_added > 0) {
 
         LoraRadio_Packet_t tx_packet;
-        MESHNETWORK_bEncodeDRepMessage(pMeshDRepPacket, tx_packet.buffer, sizeof(tx_packet.buffer), &tx_packet.length);
+
+
+        if(!MESHNETWORK_bEncodeDRepMessage(pMeshDRepPacket, tx_packet.buffer, sizeof(tx_packet.buffer), &tx_packet.length))
+        {
+        	DBG("\r\n--- PROTOBUF: PROBLEM ENCODING DREP ---\r\n");
+        }
+
 
         if (LORARADIO_bTxPacket(&tx_packet)) { // Assuming LORA_TX_QUEUE_TIMEOUT_MS is defined somewhere.
             DBG("MeshNetwork: Sending DRep to parent %u with %u neighbors. Current time: %lu.\r\n",
-                   pMeshDRepPacket->ParentID, pMeshDRepPacket->NeighborCount, xTaskGetTickCount());
+                   pMeshDRepPacket->ParentID, pMeshDRepPacket->NeighborList_count, xTaskGetTickCount());
             DBG("Next scheduled reply (if any): %lu\r\n", CurrentDiscoveryCache.tScheduledReplyTime);
             // Stop the timer after successfully sending the DRep
             xTimerStop(xMeshReplySchedulerTimer, 0);
