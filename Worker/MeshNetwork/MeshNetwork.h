@@ -35,7 +35,7 @@
  * @brief Structure to hold discovered neighbors to be returned to the application layer.
  */
 typedef struct {
-    uint16_t    device_id;
+    uint32_t    device_id;
     uint8_t     hop_count;
     int16_t     rssi;
     int8_t      snr;
