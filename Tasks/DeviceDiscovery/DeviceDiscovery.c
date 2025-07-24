@@ -84,7 +84,7 @@ void vDeviceDiscoveryAppTask(void *pvParameters) {
         if (MESHNETWORK_bGetDiscoveredNeighbors(discovered_neighbors_buffer, 250, &actual_count)) {
             DBG("DeviceDiscovery %u: Final Discovered Neighbors (%u total):\r\n", LORARADIO_u32GetUniqueId(), actual_count);
             for (uint16_t i = 0; i < actual_count; i++) {
-                DBG("  ID: %u, Hops: %u, RSSI: %d, SNR: %d, Last Seen: %lu ticks\r\n",
+                DBG("  ID:%u, Hops:%u, RSSI:%d, SNR:%d, LastSeen:%lu\r\n",
                        discovered_neighbors_buffer[i].device_id,
                        discovered_neighbors_buffer[i].hop_count,
                        discovered_neighbors_buffer[i].rssi,

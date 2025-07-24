@@ -68,6 +68,26 @@ static MeshDiscoveredNeighbor_t tMeshDiscoveredNeighbors[MESH_MAX_GLOBAL_NEIGHBO
 static uint8_t u8MeshDiscoveredNeighborsCount = 0;
 static SemaphoreHandle_t xMeshNeighborTableMutex; // Protects mesh_discovered_neighbors
 
+// --- STATIC VARIABLES FOR WAKEUP INTERVAL ---
+static WakeupInterval tCurrentWakeupInterval = WAKEUP_INTERVAL_60_MIN; // Default to 60 minutes
+// Array to map enum to actual millisecond values
+static const uint32_t u32CurrentWakeupIntervalMin[] = {
+    [WAKEUP_INTERVAL_15_MIN]  = 15, // 15 minutes
+    [WAKEUP_INTERVAL_30_MIN]  = 30, // 30 minutes
+    [WAKEUP_INTERVAL_60_MIN]  = 60, // 60 minutes
+    [WAKEUP_INTERVAL_120_MIN] = 120 // 120 minutes
+};
+
+uint32_t MESHNETWORK_u32GetWakeupInterval(void) {
+    if (tCurrentWakeupInterval < WAKEUP_INTERVAL_MAX_COUNT) {
+        return u32CurrentWakeupIntervalMin[tCurrentWakeupInterval];
+    }
+    return u32CurrentWakeupIntervalMin[WAKEUP_INTERVAL_60_MIN]; // Default or error value
+}
+
+WakeupInterval MESHNETWORK_tGetCurrentWakeupIntervalEnum(void) {
+    return tCurrentWakeupInterval;
+}
 // --- INTERNAL FREE_RTOS QUEUES ---
 typedef enum {
     MESH_EVENT_DREQ_RECEIVED = 1,

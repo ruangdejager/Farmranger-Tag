@@ -38,4 +38,6 @@ MeshDReqPacket.Snr							    int_size:IS_8
 
 MeshDRepPacket.NeighborList						max_count:16
 
+TimeSyncMessage.WakeUpInterval                  int_size:IS_8
+
 

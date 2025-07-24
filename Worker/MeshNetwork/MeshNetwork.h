@@ -29,7 +29,16 @@
 
 // --- PACKET STRUCTURES (Common to the mesh protocol) ---
 // --- These are found in the protobuf header files ---
-
+/**
+ * @brief Enum to define set wake-up intervals.
+ */
+typedef enum {
+    WAKEUP_INTERVAL_15_MIN  = 0, // Represents 15 minutes
+    WAKEUP_INTERVAL_30_MIN  = 1, // Represents 30 minutes
+    WAKEUP_INTERVAL_60_MIN  = 2, // Represents 60 minutes (1 hour)
+    WAKEUP_INTERVAL_120_MIN = 3, // Represents 120 minutes (2 hours)
+    WAKEUP_INTERVAL_MAX_COUNT // Not a real interval, just for array sizing/validation
+} WakeupInterval;
 
 /**
  * @brief Structure to hold discovered neighbors to be returned to the application layer.

@@ -41,6 +41,7 @@ message TimeSyncMessage {
 
     uint32 SenderID = 1;
     uint32 UtcTimestamp = 2;
+    uint32 WakeUpInterval = 3;
 
 }
 
