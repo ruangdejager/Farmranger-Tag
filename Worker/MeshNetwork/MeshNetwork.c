@@ -7,6 +7,7 @@
 
 
 #include "MeshNetwork.h"
+#include "MeshNetwork_Port.h"
 #include "LoraRadio.h" // Interface to the LoRa radio driver
 #include <string.h> // For memcpy, memset
 #include <stdio.h>  // For DBG (for debugging)
@@ -246,7 +247,7 @@ void MESHNETWORK_vMeshRxEventTask(void *pvParameters) {
             // Check if this DReq was originally sent by THIS device.
             // If the Original DReq Sender ID in the packet matches this device's unique ID,
             // then it's our own DReq being relayed back.
-            if (tMeshDReqPacket.OGDreqSenderID == LORARADIO_u32GetUniqueId()) {
+            if (tMeshDReqPacket.OGDreqSenderID == MESHNETWORK_u32GetUniqueId()) {
                 DBG("MeshNetwork: Received own DReq (ID: %lu, Sender: %u), ignoring.\r\n",
                         tMeshDReqPacket.Header.dReqID, tMeshDReqPacket.OGDreqSenderID);
                 // No further processing for this DReq if it's our own
@@ -290,7 +291,7 @@ void MESHNETWORK_vReplySchedulerTask(void *pvParameters) {
 		if ((uxBits & MESH_REPLY_SCHEDULE_BIT) != 0 || uxQueueMessagesWaiting(xMeshNetworkInitDReqQueue) > 0) {
 			if (xQueueReceive(xMeshNetworkInitDReqQueue, &init_event, 0) == pdPASS) { // Non-blocking read
 				// This is the primary device initiating a DReq flood
-				MESHNETWORK_vSendDReq(init_event.DReqID, LORARADIO_u32GetUniqueId(), MESH_MAX_TTL);
+				MESHNETWORK_vSendDReq(init_event.DReqID, MESHNETWORK_u32GetUniqueId(), MESH_MAX_TTL);
 				DBG("MeshReplyScheduler: Initiated DReq flood from primary device.\r\n");
 			}
 		}
@@ -301,7 +302,7 @@ void MESHNETWORK_vReplySchedulerTask(void *pvParameters) {
 		// and we haven't sent our info yet for this round.
 		if ((uxBits & MESH_REPLY_TIMER_BIT) != 0) {
 			if (CurrentDiscoveryCache.u32DReqID != 0 && // Valid discovery round active
-				LORARADIO_u32GetUniqueId() != CurrentDiscoveryCache.u32OGDreqSenderID && // Not the original sender
+				MESHNETWORK_u32GetUniqueId() != CurrentDiscoveryCache.u32OGDreqSenderID && // Not the original sender
 				CurrentDiscoveryCache.u32PreferredParentID != 0 && // Has a preferred parent
 				!CurrentDiscoveryCache.bInfoSent) { // Only send our own reply once per round
 
@@ -350,7 +351,7 @@ void MESHNETWORK_vParserTask(void *pvParameters) {
     {
 
         // Monitor the mesh device rx queue for raw packets
-    	if (LORARADIO_bRxPacket(&rx_packet))
+    	if (MESHNETWORK_bReceiveMessage(&rx_packet))
 		{
 
         	pb_istream_t PbInputStream;
@@ -425,7 +426,7 @@ bool MESHNETWORK_bStartDiscoveryRound(uint32_t dreq_id, uint32_t original_dreq_s
     CurrentDiscoveryCache.u32PreferredParentID = 0; // No parent for initiator
 
     // Add initiator's own info to its local cache (which is also its global table)
-    MESHNETWORK_vAddOrUpdateLocalCache(LORARADIO_u32GetUniqueId(), 0, 0, 0); // RSSI/SNR 0 for self
+    MESHNETWORK_vAddOrUpdateLocalCache(MESHNETWORK_u32GetUniqueId(), 0, 0, 0); // RSSI/SNR 0 for self
 
     DBG("MeshNetwork: Initiating DReq with ID %lu from %u\r\n", dreq_id, original_dreq_sender_id);
     bool queued = xQueueSend(xMeshNetworkInitDReqQueue, &event, portMAX_DELAY) == pdPASS;
@@ -519,7 +520,7 @@ static void MESHNETWORK_vAddOrUpdateLocalCache(uint32_t device_id, uint8_t hop_c
 
 static TickType_t MESHNETWORK_tCalculateReplyDelay(uint8_t my_hop_count_to_dreq_sender) {
     TickType_t delay_ms = (TickType_t)my_hop_count_to_dreq_sender * MESH_BASE_HOP_DELAY_MS;
-    delay_ms += LORARADIO_u32GetRandomNumber(MESH_REPLY_JITTER_WINDOW_MS); // Add random jitter
+    delay_ms += MESHNETWORK_u32GetRandomNumber(MESH_REPLY_JITTER_WINDOW_MS); // Add random jitter
     return delay_ms;
 }
 
@@ -566,13 +567,13 @@ static void MESHNETWORK_vHandleDReq(const MeshDReqPacket *dreq_packet) {
 			xTimerStart(xMeshReplySchedulerTimer, 0); // Start the timer
 
 			// ... (re-broadcast DReq logic) ...
-			if (LORARADIO_u32GetUniqueId() != dreq_packet->Header.senderID && dreq_packet->Ttl > 0) {
-				MESHNETWORK_vSendDReq(dreq_packet->Header.dReqID, LORARADIO_u32GetUniqueId(), dreq_packet->Ttl - 1);
+			if (MESHNETWORK_u32GetUniqueId() != dreq_packet->Header.senderID && dreq_packet->Ttl > 0) {
+				MESHNETWORK_vSendDReq(dreq_packet->Header.dReqID, MESHNETWORK_u32GetUniqueId(), dreq_packet->Ttl - 1);
 			}
 		}
 
 		// ... (add_or_update_local_cache) ...
-		MESHNETWORK_vAddOrUpdateLocalCache(LORARADIO_u32GetUniqueId(),
+		MESHNETWORK_vAddOrUpdateLocalCache(MESHNETWORK_u32GetUniqueId(),
 											  CurrentDiscoveryCache.u8MyHopCountToDReqSender,
 											  dreq_packet->Rssi, dreq_packet->Snr);
 	} else {
@@ -592,7 +593,7 @@ static void MESHNETWORK_vHandleDRep(const MeshDRepPacket *drep_packet) {
     }
 
     // If this DRep is for the original DReq sender (i.e., we are the primary device)
-    if (LORARADIO_u32GetUniqueId() == CurrentDiscoveryCache.u32OGDreqSenderID) {
+    if (MESHNETWORK_u32GetUniqueId() == CurrentDiscoveryCache.u32OGDreqSenderID) {
         // Add all reported neighbors to the global table
         uint8_t num_entries = drep_packet->NeighborList_count;
         if (num_entries > MESH_MAX_NEIGHBORS_PER_PACKET) num_entries = MESH_MAX_NEIGHBORS_PER_PACKET; // Safety check
@@ -604,10 +605,10 @@ static void MESHNETWORK_vHandleDRep(const MeshDRepPacket *drep_packet) {
                                                       drep_packet->NeighborList[i].snr);
         }
         DBG("MeshNetwork: Primary Device %u: Received DRep from %u, added %u neighbors.\r\n",
-        		LORARADIO_u32GetUniqueId(), drep_packet->Header.senderID, drep_packet->NeighborList_count);
+        		MESHNETWORK_u32GetUniqueId(), drep_packet->Header.senderID, drep_packet->NeighborList_count);
     }
     // If we are an intermediate relay node and this DRep is from a downstream child
-    else if (drep_packet->ParentID == LORARADIO_u32GetUniqueId()) {
+    else if (drep_packet->ParentID == MESHNETWORK_u32GetUniqueId()) {
         DBG("MeshNetwork: Received DRep from downstream %u, num_neighbors %u\r\n",
                drep_packet->Header.senderID, drep_packet->NeighborList_count);
         // Add all reported neighbors to our local cache for potential relaying
@@ -635,8 +636,8 @@ static void MESHNETWORK_vSendDReq(uint32_t dreq_id, uint32_t sender_id, uint8_t 
 	MeshDReqPacket meshDReqPacket;
 	meshDReqPacket.Header.senderID = sender_id;
 	meshDReqPacket.Header.dReqID = dreq_id;
-	meshDReqPacket.OGDreqSenderID = (sender_id == LORARADIO_u32GetUniqueId() &&
-			CurrentDiscoveryCache.u32DReqID == dreq_id) ? CurrentDiscoveryCache.u32OGDreqSenderID : LORARADIO_u32GetUniqueId();
+	meshDReqPacket.OGDreqSenderID = (sender_id == MESHNETWORK_u32GetUniqueId() &&
+			CurrentDiscoveryCache.u32DReqID == dreq_id) ? CurrentDiscoveryCache.u32OGDreqSenderID : MESHNETWORK_u32GetUniqueId();
 
 	// A simpler approach for the initiator would be:
 	// dreq_packet.original_dreq_sender_id = (sender_id == MESH_DEVICE_ID) ? MESH_DEVICE_ID : CurrentDiscoveryCache.original_dreq_sender_id;
@@ -644,14 +645,14 @@ static void MESHNETWORK_vSendDReq(uint32_t dreq_id, uint32_t sender_id, uint8_t 
 	// When the *primary* device initiates (MeshNetwork_start_discovery_round), it sets this cache.
 	// So, in MeshNetwork_send_dreq, if `sender_id == MESH_DEVICE_ID` and it's the *initial* send for this round,
 	// then `original_dreq_sender_id` should be `MESH_DEVICE_ID`. Otherwise, it's whatever is in the cache.
-    if (sender_id == LORARADIO_u32GetUniqueId() && dreq_id == CurrentDiscoveryCache.u32DReqID &&
+    if (sender_id == MESHNETWORK_u32GetUniqueId() && dreq_id == CurrentDiscoveryCache.u32DReqID &&
     		CurrentDiscoveryCache.u32OGDreqSenderID != 0) {
         // We are relaying or initiating, and we know who the original sender is for this round.
     	meshDReqPacket.OGDreqSenderID = CurrentDiscoveryCache.u32OGDreqSenderID;
     } else {
         // This is typically for the very first DReq from the initiator,
         // or a fallback if cache is somehow not set (shouldn't happen for a valid round).
-    	meshDReqPacket.OGDreqSenderID = LORARADIO_u32GetUniqueId();
+    	meshDReqPacket.OGDreqSenderID = MESHNETWORK_u32GetUniqueId();
     }
 
 	meshDReqPacket.Ttl = ttl;
@@ -664,7 +665,7 @@ static void MESHNETWORK_vSendDReq(uint32_t dreq_id, uint32_t sender_id, uint8_t 
 		DBG("\r\n--- PROTOBUF: PROBLEM ENCODING DREQ ---\r\n");
 	}
 
-    if (LORARADIO_bTxPacket(&tx_packet)) {
+    if (MESHNETWORK_bSendMessage(&tx_packet)) {
         DBG("MeshNetwork: Sent DReq ID %lu from %u, TTL %u.\r\n", dreq_id, sender_id, ttl);
     } else {
         DBG("MeshNetwork: Failed to send DReq ID %lu from %u.\r\n", dreq_id, sender_id);
@@ -681,7 +682,7 @@ static void MESHNETWORK_vSendDRep(void) {
     // Clear the allocated memory
     memset(pMeshDRepPacket, 0, sizeof(MeshDRepPacket) + (MESH_MAX_NEIGHBORS_PER_PACKET * sizeof(MeshNeighborInfo)));
 
-    pMeshDRepPacket->Header.senderID = LORARADIO_u32GetUniqueId();
+    pMeshDRepPacket->Header.senderID = MESHNETWORK_u32GetUniqueId();
     pMeshDRepPacket->Header.dReqID = CurrentDiscoveryCache.u32DReqID;
     pMeshDRepPacket->OGDreqSenderID = CurrentDiscoveryCache.u32OGDreqSenderID; // Added this field
     pMeshDRepPacket->ParentID = CurrentDiscoveryCache.u32PreferredParentID;
@@ -694,7 +695,7 @@ static void MESHNETWORK_vSendDRep(void) {
     // Check `my_info_sent` flag
     if (!CurrentDiscoveryCache.bInfoSent) {
         for (uint8_t i = 0; i < CurrentDiscoveryCache.u8LocalDiscoveredDevicesCount; i++) {
-            if (CurrentDiscoveryCache.tLocalDiscoveredDevices[i].u32DeviceID == LORARADIO_u32GetUniqueId()) {
+            if (CurrentDiscoveryCache.tLocalDiscoveredDevices[i].u32DeviceID == MESHNETWORK_u32GetUniqueId()) {
                 memcpy(&pMeshDRepPacket->NeighborList[neighbors_added], &CurrentDiscoveryCache.tLocalDiscoveredDevices[i], sizeof(MeshNeighborInfo));
                 CurrentDiscoveryCache.tLocalDiscoveredDevices[i].bReportedUpstream = true; // Mark as reported
                 neighbors_added++;
@@ -710,7 +711,7 @@ static void MESHNETWORK_vSendDRep(void) {
     // Don't re-add self, and only add if not already reported
     for (uint8_t i = 0; i < CurrentDiscoveryCache.u8LocalDiscoveredDevicesCount && neighbors_added < MESH_MAX_NEIGHBORS_PER_PACKET; i++) {
         LocalNeighborEntry_t *entry = &CurrentDiscoveryCache.tLocalDiscoveredDevices[i];
-        if (entry->u32DeviceID != LORARADIO_u32GetUniqueId() && !entry->bReportedUpstream) { // Don't re-add self, and only add if not already reported
+        if (entry->u32DeviceID != MESHNETWORK_u32GetUniqueId() && !entry->bReportedUpstream) { // Don't re-add self, and only add if not already reported
             memcpy(&pMeshDRepPacket->NeighborList[neighbors_added], entry, sizeof(MeshNeighborInfo));
             entry->bReportedUpstream = true; // Mark as reported
             neighbors_added++;
@@ -728,8 +729,7 @@ static void MESHNETWORK_vSendDRep(void) {
         	DBG("\r\n--- PROTOBUF: PROBLEM ENCODING DREP ---\r\n");
         }
 
-
-        if (LORARADIO_bTxPacket(&tx_packet)) { // Assuming LORA_TX_QUEUE_TIMEOUT_MS is defined somewhere.
+        if (MESHNETWORK_bSendMessage(&tx_packet)) {
             DBG("MeshNetwork: Sending DRep to parent %u with %u neighbors. Current time: %lu.\r\n",
                    pMeshDRepPacket->ParentID, pMeshDRepPacket->NeighborList_count, xTaskGetTickCount());
             DBG("Next scheduled reply (if any): %lu\r\n", CurrentDiscoveryCache.tScheduledReplyTime);
