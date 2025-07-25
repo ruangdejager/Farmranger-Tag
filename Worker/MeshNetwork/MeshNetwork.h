@@ -33,11 +33,11 @@
  * @brief Enum to define set wake-up intervals.
  */
 typedef enum {
-    WAKEUP_INTERVAL_15_MIN  = 0, // Represents 15 minutes
-    WAKEUP_INTERVAL_30_MIN  = 1, // Represents 30 minutes
-    WAKEUP_INTERVAL_60_MIN  = 2, // Represents 60 minutes (1 hour)
-    WAKEUP_INTERVAL_120_MIN = 3, // Represents 120 minutes (2 hours)
-    WAKEUP_INTERVAL_MAX_COUNT // Not a real interval, just for array sizing/validation
+    WAKEUP_INTERVAL_15_MIN  = 1, // Represents 15 minutes
+    WAKEUP_INTERVAL_30_MIN  = 2, // Represents 30 minutes
+    WAKEUP_INTERVAL_60_MIN  = 3, // Represents 60 minutes (1 hour)
+    WAKEUP_INTERVAL_120_MIN = 4, // Represents 120 minutes (2 hours)
+    WAKEUP_INTERVAL_MAX_COUNT = 4 // Not a real interval, just for array sizing/validation
 } WakeupInterval;
 
 /**
@@ -113,5 +113,13 @@ void MESHNETWORK_vParserTask(void *pvParameters);
 
 // --- FREE_RTOS TIMER PROTOTYPES ---
 void MESHNETWORK_vReplyTimerCallback(TimerHandle_t xTimer);
+
+bool MESHNETWORK_bEncodeTimesyncMessage(TimeSyncMessage * pTimeSyncMessage, uint8_t * buffer, uint16_t buffer_length, uint8_t * message_length);
+void MESHNETWORK_vHandleTimeSyncMessage(const TimeSyncMessage *time_sync_msg);
+void MESHNETWORK_vSendTimeSyncMessage(uint32_t timesync_id, uint32_t utc_timestamp, uint32_t wakeup_interval_enum_val); // Changed param name to clarify it's enum val
+
+// --- Public Accessors for Wakeup Interval ---
+uint8_t MESHNETWORK_u8GetWakeupInterval(void); // Returns current interval in minutes
+void MESHNETWORK_vSetWakeupInterval(WakeupInterval new_interval);
 
 #endif /* WORKER_MESHNETWORK_MESHNETWORK_H_ */

@@ -62,6 +62,7 @@ typedef struct {
 
 static DiscoveryCache_t CurrentDiscoveryCache;
 static uint32_t u32LastProcessedDReqID = 0; // To prevent processing old DReqs
+static uint32_t u32LastProcessedTimeSyncID = 0; // To prevent processing old TS messages
 
 // Discovered neighbors for the application layer
 #define MESH_MAX_GLOBAL_NEIGHBORS (250) // Max entries in the primary device's global table
@@ -72,23 +73,34 @@ static SemaphoreHandle_t xMeshNeighborTableMutex; // Protects mesh_discovered_ne
 // --- STATIC VARIABLES FOR WAKEUP INTERVAL ---
 static WakeupInterval tCurrentWakeupInterval = WAKEUP_INTERVAL_60_MIN; // Default to 60 minutes
 // Array to map enum to actual millisecond values
-static const uint32_t u32CurrentWakeupIntervalMin[] = {
+static const uint8_t u8CurrentWakeupIntervalMin[] = {
     [WAKEUP_INTERVAL_15_MIN]  = 15, // 15 minutes
     [WAKEUP_INTERVAL_30_MIN]  = 30, // 30 minutes
     [WAKEUP_INTERVAL_60_MIN]  = 60, // 60 minutes
     [WAKEUP_INTERVAL_120_MIN] = 120 // 120 minutes
 };
 
-uint32_t MESHNETWORK_u32GetWakeupInterval(void) {
+uint8_t MESHNETWORK_u8GetWakeupInterval(void) {
     if (tCurrentWakeupInterval < WAKEUP_INTERVAL_MAX_COUNT) {
-        return u32CurrentWakeupIntervalMin[tCurrentWakeupInterval];
+        return u8CurrentWakeupIntervalMin[tCurrentWakeupInterval];
     }
-    return u32CurrentWakeupIntervalMin[WAKEUP_INTERVAL_60_MIN]; // Default or error value
+    return u8CurrentWakeupIntervalMin[WAKEUP_INTERVAL_60_MIN]; // Default or error value
 }
 
 WakeupInterval MESHNETWORK_tGetCurrentWakeupIntervalEnum(void) {
     return tCurrentWakeupInterval;
 }
+
+void MESHNETWORK_vSetWakeupInterval(WakeupInterval new_interval) {
+    if (new_interval < WAKEUP_INTERVAL_MAX_COUNT) {
+        tCurrentWakeupInterval = new_interval;
+        DBG("MeshNetwork: Wakeup interval set to %u minutes (enum %u).\r\n",
+               MESHNETWORK_u8GetWakeupInterval(), tCurrentWakeupInterval);
+    } else {
+        DBG("MeshNetwork: Attempted to set invalid wakeup interval enum: %u.\r\n", (unsigned int)new_interval);
+    }
+}
+
 // --- INTERNAL FREE_RTOS QUEUES ---
 typedef enum {
     MESH_EVENT_DREQ_RECEIVED = 1,
@@ -224,6 +236,7 @@ bool MESHNETWORK_bEncodeDRepMessage(MeshDRepPacket * pMeshDRepPacket, uint8_t * 
 	// Encode msg
 	if (!pb_encode(&PbOutputStream, MeshDRepPacket_fields , pMeshDRepPacket))
 	{
+		DBG("PB_ENCODE_ERROR_TIMESYNC: %s\r\n", PB_GET_ERROR(&PbOutputStream));
 		return false;
 	}
 
@@ -231,6 +244,30 @@ bool MESHNETWORK_bEncodeDRepMessage(MeshDRepPacket * pMeshDRepPacket, uint8_t * 
 
     return true;
 
+}
+
+bool MESHNETWORK_bEncodeTimesyncMessage(TimeSyncMessage * pTimeSyncMessage, uint8_t * buffer, uint16_t buffer_length, uint8_t * message_length)
+{
+    pb_ostream_t PbOutputStream;
+
+    // Setup output stream for PB encoding
+    PbOutputStream = pb_ostream_from_buffer(buffer, buffer_length);
+
+    buffer[0] = MeshPacketType_MESH_PACKET_TYPE_TIMESYNC;
+
+    // Setup output stream for PB encoding (offset by 1 byte for type)
+    PbOutputStream = pb_ostream_from_buffer(&buffer[1], buffer_length - 1);
+
+    // Encode msg
+    if (!pb_encode(&PbOutputStream, TimeSyncMessage_fields, pTimeSyncMessage))
+    {
+        DBG("PB_ENCODE_ERROR_TIMESYNC: %s\r\n", PB_GET_ERROR(&PbOutputStream));
+        return false;
+    }
+
+    *message_length = PbOutputStream.bytes_written + 1; // Add 1 for the type byte
+
+    return true;
 }
 
 void MESHNETWORK_vMeshRxEventTask(void *pvParameters) {
@@ -631,6 +668,30 @@ static void MESHNETWORK_vHandleDRep(const MeshDRepPacket *drep_packet) {
 
 }
 
+void MESHNETWORK_vHandleTimeSyncMessage(const TimeSyncMessage *time_sync_msg)
+{
+    // Check if this TimeSyncID has been processed before
+    if (time_sync_msg->TimesyncID > u32LastProcessedTimeSyncID) {
+        DBG("MeshNetwork: New TimeSync (ID: %lu, TS: %lu, Interval: %lu) received.\r\n",
+               time_sync_msg->TimesyncID, time_sync_msg->UtcTimestamp, time_sync_msg->WakeUpInterval);
+
+        u32LastProcessedTimeSyncID = time_sync_msg->TimesyncID;
+        MESHNETWORK_vSetWakeupInterval((WakeupInterval)time_sync_msg->WakeUpInterval);
+        MESHNETWORK_vProcessUTCTimestamp(time_sync_msg->UtcTimestamp);
+
+        // Re-broadcast (forward) the TimeSyncMessage to ensure it propagates through the mesh
+        // Do NOT re-broadcast if this device was the original sender (though this function
+        // should only be called for received packets, it's a good defensive check).
+        // For simplicity, we'll re-broadcast it as is.
+        MESHNETWORK_vSendTimeSyncMessage(time_sync_msg->TimesyncID,
+                                         time_sync_msg->UtcTimestamp,
+                                         time_sync_msg->WakeUpInterval);
+
+    } else {
+        DBG("MeshNetwork: Ignored old/duplicate TimeSync (ID: %lu).\r\n", time_sync_msg->TimesyncID);
+    }
+}
+
 static void MESHNETWORK_vSendDReq(uint32_t dreq_id, uint32_t sender_id, uint8_t ttl) {
 
 	MeshDReqPacket meshDReqPacket;
@@ -741,4 +802,24 @@ static void MESHNETWORK_vSendDRep(void) {
     }
     // Free the dynamically allocated memory
     vPortFree(pMeshDRepPacket);
+}
+
+void MESHNETWORK_vSendTimesyncMessage(uint32_t timesync_id, uint32_t utc_timestamp, WakeupInterval wakeup_interval) {
+
+	TimeSyncMessage meshTimesyncPacket;
+	meshTimesyncPacket.TimesyncID = timesync_id;
+	meshTimesyncPacket.UtcTimestamp = utc_timestamp;
+	meshTimesyncPacket.WakeUpInterval = wakeup_interval;
+
+    LoraRadio_Packet_t tx_packet;
+	if(!MESHNETWORK_bEncodeTimesyncMessage(&meshTimesyncPacket, tx_packet.buffer, sizeof(tx_packet.buffer), &tx_packet.length))
+	{
+		DBG("\r\n--- PROTOBUF: PROBLEM ENCODING TIMESYNC ---\r\n");
+	}
+
+    if (MESHNETWORK_bSendMessage(&tx_packet)) {
+        DBG("MeshNetwork: Sent TS ID %u at %u UTC.\r\n", timesync_id, utc_timestamp);
+    } else {
+        DBG("MeshNetwork: Failed to send TS ID.\r\n", timesync_id);
+    }
 }
