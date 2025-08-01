@@ -18,7 +18,7 @@
 #define LORA_TX_QUEUE_SIZE      (10)
 #define LORA_RX_QUEUE_SIZE      (10)
 #define LORA_TASK_PRIORITY      (configMAX_PRIORITIES - 1) // Highest priority
-#define LORA_TASK_STACK_SIZE    (configMINIMAL_STACK_SIZE * 4)
+#define LORA_TASK_STACK_SIZE    (configMINIMAL_STACK_SIZE * 10)
 #define LORA_POLLING_DELAY_MS   (10) // Delay for polling RX in transceiver task
 
 #define CAD_CLEAR_BIT   (1 << 0)
@@ -301,5 +301,15 @@ bool LORARADIO_bCarrierSenseAndWait(uint32_t maxWaitMs)
 
     DBG("Carrier sense timed out after %lu ms\r\n", maxWaitMs);
     return false; // Timeout reached
+}
+
+void LORARADIO_vEnterDeepSleep(void)
+{
+	LORARADIO_DRIVER_vEnterDeepSleep();
+}
+
+void LORARADIO_vWakeUp(void)
+{
+	LORARADIO_DRIVER_vWakeUp();
 }
 

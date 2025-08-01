@@ -91,4 +91,8 @@ bool LORARADIO_bCarrierSense(void);
 
 bool LORARADIO_bCarrierSenseAndWait(uint32_t maxWaitMs);
 
+void LORARADIO_vEnterDeepSleep(void);
+
+void LORARADIO_vWakeUp(void);
+
 #endif /* DEVICE_LORARADIO_LORARADIO_H_ */
