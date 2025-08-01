@@ -97,11 +97,6 @@ bool MESHNETWORK_bGetDiscoveredNeighbors(MeshDiscoveredNeighbor_t *buffer, uint1
 void MESHNETWORK_vClearDiscoveredNeighbors(void);
 
 /**
- * @brief FreeRTOS Task for handling parsed DReq and DRep packets.
- */
-void MESHNETWORK_vMeshRxEventTask(void *pvParameters); // Renamed from vMeshNetworkTask
-
-/**
  * @brief FreeRTOS Task for managing DReq initiation and DRep relaying scheduling.
  */
 void MESHNETWORK_vReplySchedulerTask(void *pvParameters);
@@ -116,7 +111,7 @@ void MESHNETWORK_vReplyTimerCallback(TimerHandle_t xTimer);
 
 bool MESHNETWORK_bEncodeTimesyncMessage(TimeSyncMessage * pTimeSyncMessage, uint8_t * buffer, uint16_t buffer_length, uint8_t * message_length);
 void MESHNETWORK_vHandleTimeSyncMessage(const TimeSyncMessage *time_sync_msg);
-void MESHNETWORK_vSendTimeSyncMessage(uint32_t timesync_id, uint32_t utc_timestamp, uint32_t wakeup_interval_enum_val); // Changed param name to clarify it's enum val
+void MESHNETWORK_vSendTimesyncMessage(uint32_t timesync_id, uint32_t utc_timestamp, WakeupInterval wakeup_interval);
 
 // --- Public Accessors for Wakeup Interval ---
 uint8_t MESHNETWORK_u8GetWakeupInterval(void); // Returns current interval in minutes

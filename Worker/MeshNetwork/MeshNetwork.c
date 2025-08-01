@@ -71,7 +71,7 @@ static uint8_t u8MeshDiscoveredNeighborsCount = 0;
 static SemaphoreHandle_t xMeshNeighborTableMutex; // Protects mesh_discovered_neighbors
 
 // --- STATIC VARIABLES FOR WAKEUP INTERVAL ---
-static WakeupInterval tCurrentWakeupInterval = WAKEUP_INTERVAL_60_MIN; // Default to 60 minutes
+static WakeupInterval tCurrentWakeupInterval = WAKEUP_INTERVAL_15_MIN; // Default to 60 minutes
 // Array to map enum to actual millisecond values
 static const uint8_t u8CurrentWakeupIntervalMin[] = {
     [WAKEUP_INTERVAL_15_MIN]  = 15, // 15 minutes
@@ -115,9 +115,6 @@ typedef struct {
 } MeshInitDReqEvent_t;
 
 static QueueHandle_t xMeshNetworkInitDReqQueue;
-static QueueHandle_t xMeshNetworkDReqQueue; // Queue for DReq from Mesh Device
-static QueueHandle_t xMeshNetworkDRepQueue; // Queue for DReq from Mesh Device
-QueueSetHandle_t xMeshNetworkEventQueueSet;
 
 // Event group for the reply scheduler to signal it needs to check for replies
 static EventGroupHandle_t xMeshReplySchedulerEventGroup;
@@ -141,20 +138,10 @@ static void MESHNETWORK_vSendDRep(void);
 
 void MESHNETWORK_vInit(void) {
 
-	xMeshNetworkDReqQueue = xQueueCreate(MESH_DREQ_QUEUE_SIZE, sizeof(MeshDReqPacket));
-	xMeshNetworkDRepQueue = xQueueCreate(MESH_DREP_QUEUE_SIZE, sizeof(MeshDRepPacket));
 	xMeshNetworkInitDReqQueue = xQueueCreate(MESH_INIT_DREQ_QUEUE_SIZE, sizeof(MeshInitDReqEvent_t));
-
-    xMeshNetworkEventQueueSet = xQueueCreateSet(MESH_DREQ_QUEUE_SIZE + MESH_DREP_QUEUE_SIZE);
-    configASSERT(xMeshNetworkEventQueueSet != NULL);
-    xQueueAddToSet(xMeshNetworkDReqQueue, xMeshNetworkEventQueueSet);
-    xQueueAddToSet(xMeshNetworkDRepQueue, xMeshNetworkEventQueueSet);
 
     xMeshNeighborTableMutex = xSemaphoreCreateMutex();
     xMeshReplySchedulerEventGroup = xEventGroupCreate();
-
-    configASSERT(xMeshNetworkDReqQueue != NULL || xMeshNetworkDRepQueue != NULL ||
-    		xMeshNeighborTableMutex != NULL || xMeshReplySchedulerEventGroup != NULL || xMeshNetworkInitDReqQueue != NULL);
 
     // Create the software timer for reply scheduling
 	xMeshReplySchedulerTimer = xTimerCreate("MeshReplyTimer",
@@ -168,14 +155,6 @@ void MESHNETWORK_vInit(void) {
     u8MeshDiscoveredNeighborsCount = 0;
 
     BaseType_t status;
-    status = xTaskCreate(MESHNETWORK_vMeshRxEventTask,
-                "MeshRxEventTask",
-                MESH_TASK_STACK_SIZE,
-                NULL,
-				MESH_RX_HANDLER_TASK_PRIORITY,
-                NULL);
-    configASSERT(status == pdPASS);
-
     status = xTaskCreate(MESHNETWORK_vParserTask,
                 "MeshParserTask",
                 MESH_TASK_STACK_SIZE,
@@ -270,45 +249,6 @@ bool MESHNETWORK_bEncodeTimesyncMessage(TimeSyncMessage * pTimeSyncMessage, uint
     return true;
 }
 
-void MESHNETWORK_vMeshRxEventTask(void *pvParameters) {
-    (void)pvParameters;
-
-    for (;;) {
-        QueueSetMemberHandle_t activeQueue = xQueueSelectFromSet(xMeshNetworkEventQueueSet, portMAX_DELAY);
-
-        if (activeQueue == xMeshNetworkDReqQueue)
-        {
-            MeshDReqPacket tMeshDReqPacket;
-            xQueueReceive(xMeshNetworkDReqQueue, &tMeshDReqPacket, 0);  // Always 0 timeout after select
-
-            // Check if this DReq was originally sent by THIS device.
-            // If the Original DReq Sender ID in the packet matches this device's unique ID,
-            // then it's our own DReq being relayed back.
-            if (tMeshDReqPacket.OGDreqSenderID == MESHNETWORK_u32GetUniqueId()) {
-                DBG("MeshNetwork: Received own DReq (ID: %lu, Sender: %u), ignoring.\r\n",
-                        tMeshDReqPacket.Header.dReqID, tMeshDReqPacket.OGDreqSenderID);
-                // No further processing for this DReq if it's our own
-            } else {
-                // If it's NOT our own DReq, then handle it normally:
-                // 1. Evaluate if it's a new DReq round or offers a better path.
-                // 2. Schedule a DRep reply based on hop count.
-                // 3. Potentially re-broadcast the DReq.
-                MESHNETWORK_vHandleDReq(&tMeshDReqPacket);
-                // Signal the reply scheduler to re-evaluate its state after processing a DReq
-                xEventGroupSetBits(xMeshReplySchedulerEventGroup, MESH_REPLY_SCHEDULE_BIT);
-            }
-        }
-        else if (activeQueue == xMeshNetworkDRepQueue)
-        {
-            MeshDRepPacket tMeshDRepPacket;
-            xQueueReceive(xMeshNetworkDRepQueue, &tMeshDRepPacket, 0);  // Always 0 timeout after select
-            MESHNETWORK_vHandleDRep(&tMeshDRepPacket);
-        }
-    }
-
-    vTaskDelete(NULL);
-}
-
 void MESHNETWORK_vReplySchedulerTask(void *pvParameters) {
     (void)pvParameters;
 
@@ -383,6 +323,7 @@ void MESHNETWORK_vParserTask(void *pvParameters) {
 
     MeshDReqPacket tMeshDReqPacket;
     MeshDRepPacket tMeshDRepPacket;
+    TimeSyncMessage tMeshTSPacket;
 
     for (;;)
     {
@@ -409,9 +350,22 @@ void MESHNETWORK_vParserTask(void *pvParameters) {
 				tMeshDReqPacket.Rssi = rx_packet.rssi;
 				tMeshDReqPacket.Snr = rx_packet.snr;
 
-				if (xQueueSend(xMeshNetworkDReqQueue, &tMeshDReqPacket, pdMS_TO_TICKS(100)) != pdPASS) {
-					// Handle send failure (rare with portMAX_DELAY)
-				}
+	            // Check if this DReq was originally sent by THIS device.
+	            // If the Original DReq Sender ID in the packet matches this device's unique ID,
+	            // then it's our own DReq being relayed back.
+	            if (tMeshDReqPacket.OGDreqSenderID == MESHNETWORK_u32GetUniqueId()) {
+	                DBG("MeshNetwork: Received own DReq (ID: %lu, Sender: %u), ignoring.\r\n",
+	                        tMeshDReqPacket.Header.dReqID, tMeshDReqPacket.OGDreqSenderID);
+	                // No further processing for this DReq if it's our own
+	            } else {
+	                // If it's NOT our own DReq, then handle it normally:
+	                // 1. Evaluate if it's a new DReq round or offers a better path.
+	                // 2. Schedule a DRep reply based on hop count.
+	                // 3. Potentially re-broadcast the DReq.
+	                MESHNETWORK_vHandleDReq(&tMeshDReqPacket);
+	                // Signal the reply scheduler to re-evaluate its state after processing a DReq
+	                xEventGroupSetBits(xMeshReplySchedulerEventGroup, MESH_REPLY_SCHEDULE_BIT);
+	            }
 
 			} else if ( rx_packet.buffer[0] == MeshPacketType_MESH_PACKET_TYPE_DREP ) {
 
@@ -423,16 +377,22 @@ void MESHNETWORK_vParserTask(void *pvParameters) {
 					DBG("--- PROTOBUF: PROBLEM DECODING DREP ---\r\n");
 				}
 
-
-				if (xQueueSend(xMeshNetworkDRepQueue, &tMeshDRepPacket, pdMS_TO_TICKS(100)) != pdPASS) {
-					// Handle send failure (rare with portMAX_DELAY)
-				}
+				MESHNETWORK_vHandleDRep(&tMeshDRepPacket);
 
 			} else if ( rx_packet.buffer[0] == MeshPacketType_MESH_PACKET_TYPE_TIMESYNC) {
-				// Not yet implemented
+
+				// Clear struct for PB request msg
+				memset(&tMeshTSPacket, 0, sizeof(TimeSyncMessage));
+				// If not we check if it is a DREP Message (Discovery reply)
+				if(!pb_decode(&PbInputStream, TimeSyncMessage_fields, &tMeshTSPacket))
+				{
+					DBG("--- PROTOBUF: PROBLEM DECODING TS ---\r\n");
+				}
+
+				MESHNETWORK_vHandleTimeSyncMessage(&tMeshTSPacket);
+
 			}
 		}
-
     }
 
     vTaskDelete(NULL);
@@ -683,7 +643,7 @@ void MESHNETWORK_vHandleTimeSyncMessage(const TimeSyncMessage *time_sync_msg)
         // Do NOT re-broadcast if this device was the original sender (though this function
         // should only be called for received packets, it's a good defensive check).
         // For simplicity, we'll re-broadcast it as is.
-        MESHNETWORK_vSendTimeSyncMessage(time_sync_msg->TimesyncID,
+        MESHNETWORK_vSendTimesyncMessage(time_sync_msg->TimesyncID,
                                          time_sync_msg->UtcTimestamp,
                                          time_sync_msg->WakeUpInterval);
 
