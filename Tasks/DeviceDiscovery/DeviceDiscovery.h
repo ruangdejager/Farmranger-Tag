@@ -17,7 +17,7 @@
 #define APP_IS_PRIMARY_DEVICE       (APP_DEVICE_ID >= 1 && APP_DEVICE_ID <= 3) // Define if this device is a primary initiator
 
 // Discovery Timing
-#define APP_WAKEUP_BUFFER_MS        (10 * 1000) // 30 seconds buffer after synchronized wake-up
+#define APP_WAKEUP_BUFFER_MS        (5 * 1000) // 30 seconds buffer after synchronized wake-up
 #define APP_DISCOVERY_WINDOW_MS     (10 * 1000) // 60 seconds for the entire discovery process
 
 // Mesh Network Parameters (passed to MeshNetwork layer)
@@ -31,25 +31,32 @@
 // Event Group Bits for synchronized wake-up
 #define DISCOVERY_WAKEUP_BIT    (1UL << 0UL) // Set by external RTC/timer for synchronized wake-up
 
-// Function Prototypes
+/**
+ * @brief Enum to define set wake-up intervals.
+ */
+typedef enum {
+	DEVICE_PRIMARY  = 1,
+	DEVICE_SECONDARY
+} DiscoveryDeviceRole;
 
 /**
  * @brief Initializes the Device Discovery application layer.
  * Creates FreeRTOS resources for this layer and configures the MeshNetwork layer.
  */
-void DeviceDiscovery_init(void);
+void DEVICE_DISCOVERY_vInit(void);
 
 /**
  * @brief FreeRTOS Task for the Device Discovery application.
  * Manages the overall discovery process, including wake-up, initiation (for primary),
  * and result collection.
  */
-void vDeviceDiscoveryAppTask(void *pvParameters);
+void DEVICE_DISCOVERY_vAppTask(void *pvParameters);
 
 /**
  * @brief External function to simulate a synchronized wake-up event.
  * In a real system, this would be called by an RTC or timer ISR.
  */
-void DeviceDiscovery_SimulateSynchronizedWakeup(void);
+void DEVICE_DISCOVERY_vCheckWakeupSchedule(void);
+void DEVICE_DISCOVERY_vSendTS(void);
 
 #endif /* TASKS_DEVICEDISCOVERY_DEVICEDISCOVERY_H_ */
