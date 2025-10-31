@@ -74,7 +74,7 @@ static SemaphoreHandle_t xMeshNeighborTableMutex; // Protects mesh_discovered_ne
 static WakeupInterval tCurrentWakeupInterval = WAKEUP_INTERVAL_15_MIN; // Default to 60 minutes
 // Array to map enum to actual millisecond values
 static const uint8_t u8CurrentWakeupIntervalMin[] = {
-    [WAKEUP_INTERVAL_15_MIN]  = 15, // 15 minutes
+    [WAKEUP_INTERVAL_15_MIN]  = 1, // 15 minutes
     [WAKEUP_INTERVAL_30_MIN]  = 30, // 30 minutes
     [WAKEUP_INTERVAL_60_MIN]  = 60, // 60 minutes
     [WAKEUP_INTERVAL_120_MIN] = 120 // 120 minutes

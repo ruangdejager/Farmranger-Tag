@@ -65,7 +65,9 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters) {
 		DBG("DeviceDiscovery %u: Woke up for discovery.\r\n", LORARADIO_u32GetUniqueId());
 		vTaskDelay(pdMS_TO_TICKS(APP_WAKEUP_BUFFER_MS)); // Wait for buffer time
 
-		DBG("DeviceDiscovery %u: Starting discovery window.\r\n", LORARADIO_u32GetUniqueId());
+		if (tDeviceRole == DEVICE_PRIMARY) {
+			DBG("DeviceDiscovery %u: Starting discovery window.\r\n", LORARADIO_u32GetUniqueId());
+		}
 
 		// 2. Clear previous discovery results in MeshNetwork layer
 		MESHNETWORK_vClearDiscoveredNeighbors();
@@ -103,6 +105,17 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters) {
 			}
 		}
 
+		// 6. Wait a moment after discovery window has complete. Execute time sync.
+		vTaskDelay(pdMS_TO_TICKS(1000));
+
+		if (tDeviceRole == DEVICE_PRIMARY)
+		{
+			DEVICE_DISCOVERY_vSendTS();
+		}
+
+		// 7. Wait for the time sync to complete
+		vTaskDelay(pdMS_TO_TICKS(5000));
+
 		LORARADIO_vEnterDeepSleep();
 		SYSTEM_vActivateDeepSleep();
 
@@ -113,7 +126,7 @@ void DEVICE_DISCOVERY_vCheckWakeupSchedule(void)
 {
 
 	// Check for wakeup condition
-	if(RTC_u64GetUTC() % (MESHNETWORK_u8GetWakeupInterval()*4) == 0 )
+	if(RTC_u64GetUTC() % (MESHNETWORK_u8GetWakeupInterval()*60) == 0 )
 	{
 
 		SYSTEM_vDeactivateDeepSleep();
@@ -136,5 +149,5 @@ void DEVICE_DISCOVERY_vSendTS(void)
 {
     DBG("\r\n--- START TIMESYNC ---\r\n");
     uint32_t current_ts_id = xTaskGetTickCount();
-    MESHNETWORK_vSendTimesyncMessage(current_ts_id, RTC_u64GetUTC(), WAKEUP_INTERVAL_15_MIN);
+    MESHNETWORK_vSendTimesyncMessage(current_ts_id, RTC_u64GetUTC(), MESHNETWORK_tGetCurrentWakeupIntervalEnum());
 }

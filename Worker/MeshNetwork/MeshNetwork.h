@@ -115,6 +115,7 @@ void MESHNETWORK_vSendTimesyncMessage(uint32_t timesync_id, uint32_t utc_timesta
 
 // --- Public Accessors for Wakeup Interval ---
 uint8_t MESHNETWORK_u8GetWakeupInterval(void); // Returns current interval in minutes
+WakeupInterval MESHNETWORK_tGetCurrentWakeupIntervalEnum(void);
 void MESHNETWORK_vSetWakeupInterval(WakeupInterval new_interval);
 
 #endif /* WORKER_MESHNETWORK_MESHNETWORK_H_ */

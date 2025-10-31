@@ -9,7 +9,7 @@
 #define DEVICE_LORARADIO_LORARADIO_CONFIG_H_
 
 #define RF_FREQUENCY                                868000000 /* Hz */
-#define TX_OUTPUT_POWER                             22        /* dBm */
+#define TX_OUTPUT_POWER                             14        /* dBm */
 #define LORA_BANDWIDTH                           	LORA_BW_250;   /* kHz - This define comes from radio_driver.h*/
 #define LORA_SPREADING_FACTOR                       8
 #define LORA_CODINGRATE                             1
