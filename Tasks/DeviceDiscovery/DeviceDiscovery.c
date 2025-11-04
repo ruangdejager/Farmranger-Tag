@@ -50,8 +50,27 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters) {
     (void)pvParameters;
 
     uint32_t current_dreq_id = 0; // Unique ID for each discovery round
+#ifdef TEST_LORA_LED
+    LoraRadio_Packet_t myPacket;
+#endif
+
 
     for (;;) {
+
+#ifdef TEST_LORA_LED
+		while (1)
+		{
+			vTaskDelay(pdMS_TO_TICKS(1000));
+			myPacket.buffer[0] = 0xAA;
+			myPacket.buffer[1] = 0xBB;
+			myPacket.buffer[2] = 0xCC;
+			myPacket.length = 3;
+	    	if (tDeviceRole == DEVICE_PRIMARY){
+	    		LORARADIO_bTxPacket(&myPacket);
+	    	}
+		}
+#endif
+
 
 		// 1. Wait for synchronized wake-up signal
 		DBG("DeviceDiscovery: Waiting for synchronized wake-up...\r\n");

@@ -331,7 +331,14 @@ void MESHNETWORK_vParserTask(void *pvParameters) {
         // Monitor the mesh device rx queue for raw packets
     	if (MESHNETWORK_bReceiveMessage(&rx_packet))
 		{
-
+#ifdef TEST_LORA_LED
+    		if ((rx_packet.buffer[0] == 0xAA) && (rx_packet.buffer[2] == 0xCC))
+    		{
+            	BSP_LED_On(LED_RED);
+            	vTaskDelay(pdMS_TO_TICKS(40));
+            	BSP_LED_Off(LED_RED);
+    		}
+#endif
         	pb_istream_t PbInputStream;
 
             // Setup input stream for PB decoding
@@ -411,7 +418,6 @@ bool MESHNETWORK_bStartDiscoveryRound(uint32_t dreq_id, uint32_t original_dreq_s
     event.DReqID = dreq_id;
     event.OGDReqSenderID = original_dreq_sender_id;
 
-    DBG("\r\n--------\r\nCount: %d\r\n--------\r\n", CurrentDiscoveryCache.u8LocalDiscoveredDevicesCount);
     // Set up the cache for the primary device's own DReq
     // This part is critical as it sets up the initial state for the reply scheduler.
     memset(&CurrentDiscoveryCache, 0, sizeof(DiscoveryCache_t));
