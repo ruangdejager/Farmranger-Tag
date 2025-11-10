@@ -21,8 +21,8 @@
 #define LORA_TASK_STACK_SIZE    (configMINIMAL_STACK_SIZE * 10)
 #define LORA_POLLING_DELAY_MS   (10) // Delay for polling RX in transceiver task
 
-#define CAD_CLEAR_BIT   (1 << 0)
-#define CAD_BUSY_BIT    (1 << 1)
+#define CAD_CLEAR_BIT   		(1 << 0)
+#define CAD_BUSY_BIT    		(1 << 1)
 
 
 // --- PRIVATE FREE_RTOS QUEUES ---
