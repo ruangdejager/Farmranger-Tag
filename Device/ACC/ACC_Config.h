@@ -40,10 +40,10 @@
 
 #define ACC_SPI_ADDR_MASK				LIS2DH_SPI_ADDR_MASK
 
-#define ACC_SPI							SPI2
-#define BSP_ACC_SPI_AF                  GPIO_AF5_SPI2
-#define ACC_SPI_CLK_ENABLE()			__HAL_RCC_SPI2_CLK_ENABLE();
-#define ACC_SPI_CLK_DISABLE()			__HAL_RCC_SPI2_CLK_DISABLE();
+#define ACC_SPI							SPI1
+#define BSP_ACC_SPI_AF                  GPIO_AF5_SPI1
+#define ACC_SPI_CLK_ENABLE()			__HAL_RCC_SPI1_CLK_ENABLE();
+#define ACC_SPI_CLK_DISABLE()			__HAL_RCC_SPI1_CLK_DISABLE();
 
 #define ACC_PORT_CLK_ENABLE()\
 {\

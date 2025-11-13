@@ -116,13 +116,13 @@ void GPS_vInit(void)
 {
 
 	// Init UART
-	GPS_DRIVER_vInitGPS(&gps.UartHandle);
-	// UART interface will be enabled/disabled at EG91 powerup/powerdown
-	GPS_DRIVER_vEnableUart(&gps.UartHandle);
-	// Drive the 1.8V VCC and 0.9V VCC_RF and VCC_CORE high
-	GPS_DRIVER_vPowerEnHigh();
-	// Here we make the reset pin high impedance, the reset pin is internally pulled high.
-	HAL_GPIO_vInitInput(BSP_GPS_RESET_PORT, BSP_GPS_RESET_PIN, GPIO_NOPULL);
+//	GPS_DRIVER_vInitGPS(&gps.UartHandle);
+//	// UART interface will be enabled/disabled at EG91 powerup/powerdown
+//	GPS_DRIVER_vEnableUart(&gps.UartHandle);
+//	// Drive the 1.8V VCC and 0.9V VCC_RF and VCC_CORE high
+//	GPS_DRIVER_vPowerEnHigh();
+//	// Here we make the reset pin high impedance, the reset pin is internally pulled high.
+//	HAL_GPIO_vInitInput(BSP_GPS_RESET_PORT, BSP_GPS_RESET_PIN, GPIO_NOPULL);
 
 //	HAL_UART_vClearBuffer(&gps.UartHandle);
 //	//___ Enable GPS Accuracy ___

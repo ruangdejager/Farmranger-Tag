@@ -413,7 +413,6 @@ bool MOVE_bUpdateMovementLevel(uint8_t * pu8Level)
 {
 	uint8_t u8;
 	acc_t AccMoveDev;
-	//	uint8_t u8NumSamplesInFifo;
 
 	// Read all bytes from FIFO (read until empty)
 	if ( ACC_u8NumSamplesInFifo() > 0 ) {
@@ -469,15 +468,8 @@ bool MOVE_bUpdateMovementLevel(uint8_t * pu8Level)
 		// Copy to target ptr
 		*pu8Level = MoveAlg.u8EnvLevel;
 
-		// Output to USB terminal
-//		USB_HID_bPutMove(
-//			(int8_t)AccMoveDev.i16.i16OutX,
-//			(int8_t)AccMoveDev.i16.i16OutY,
-//			(int8_t)AccMoveDev.i16.i16OutZ,
-//			MoveAlg.u8EnvLevel,
-//			MOVE_u8GetAlarmSettingNow(MOVE_ALARM_SETTING_MAX_LEVEL),
-//			MOVE_u8GetAlarmSettingNow(MOVE_ALARM_SETTING_MIN_LEVEL)
-//		);
+		// Output to Serial terminal
+//		DBG("+++ %d \t %d \t %d +++\r\n", (int8_t)AccMoveDev.i16.i16OutX, (int8_t)AccMoveDev.i16.i16OutZ, (int8_t)AccMoveDev.i16.i16OutZ);
 
 		// Sensor health check #3: no delta error
 		// Check for no change in data error; do at this point with scaled-down samples, as we saw "noise" with raw samples
