@@ -8,10 +8,10 @@
 #ifndef WORKER_MOVEMENT_MOVEMENT_DRIVER_H_
 #define WORKER_MOVEMENT_MOVEMENT_DRIVER_H_
 
-#include <hal_bsp.h>
+#include "hal_bsp.h"
 #include <stdbool.h>
+#include "Acc.h"
 
-#include "ACC.h"
 
 #define MOVE_DRIVER_acclSampleTypedef               acc_t
 

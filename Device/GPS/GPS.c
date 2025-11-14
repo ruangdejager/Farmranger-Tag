@@ -1,11 +1,11 @@
 /*
- * GPS.c
+ * Gps.c
  *
- *  Created on: Nov 5, 2025
+ *  Created on: Nov 14, 2025
  *      Author: Ruan de Jager
  */
 
-#include "gps.h"
+#include "Gps.h"
 #include "debug_uart_output.h"
 
 #define GPS_RX_TASK_PRIORITY      (configMAX_PRIORITIES - 1) // Highest priority
@@ -116,16 +116,16 @@ void GPS_vInit(void)
 {
 
 	// Init UART
-//	GPS_DRIVER_vInitGPS(&gps.UartHandle);
-//	// UART interface will be enabled/disabled at EG91 powerup/powerdown
-//	GPS_DRIVER_vEnableUart(&gps.UartHandle);
-//	// Drive the 1.8V VCC and 0.9V VCC_RF and VCC_CORE high
-//	GPS_DRIVER_vPowerEnHigh();
-//	// Here we make the reset pin high impedance, the reset pin is internally pulled high.
-//	HAL_GPIO_vInitInput(BSP_GPS_RESET_PORT, BSP_GPS_RESET_PIN, GPIO_NOPULL);
+	GPS_DRIVER_vInitGPS(&gps.UartHandle);
+	// UART interface will be enabled/disabled at EG91 powerup/powerdown
+	GPS_DRIVER_vEnableUart(&gps.UartHandle);
+	// Drive the 1.8V VCC and 0.9V VCC_RF and VCC_CORE high
+	GPS_DRIVER_vPowerEnHigh();
+	// Here we make the reset pin high impedance, the reset pin is internally pulled high.
+	HAL_GPIO_vInitInput(BSP_GPS_RESET_PORT, BSP_GPS_RESET_PIN, GPIO_NOPULL);
 
-//	HAL_UART_vClearBuffer(&gps.UartHandle);
-//	//___ Enable GPS Accuracy ___
+	HAL_UART_vClearBuffer(&gps.UartHandle);
+	//___ Enable GPS Accuracy ___
 //	uint8_t buffer[] = {"$PQTMCFGMSGRATE,W,PQTMEPE,1,2*1D\r\n"};
 //	GPS_DRIVER_u8TxPutBuffer(&gps.UartHandle, buffer, sizeof(buffer));
 
@@ -166,8 +166,7 @@ void GPS_vRxTask(void *parameters)
 		vTaskDelay(pdMS_TO_TICKS(1));
 		while ( UART_bReadByte(&gps.UartHandle, &gps.byte) )
 		{
-//			DBG_UART_vPutByte(gps.byte);
-//			u32GnssRxLastTs = HAL_TIMER_u32GetValue();
+			u32GnssRxLastTs = RTC_u64GetTicks();
 			GPS_bOnRxByte(gps.byte);
 		}
 
@@ -1133,4 +1132,3 @@ bool bAddUbxChecksum(uint8_t * pUbxFrame, uint16_t u16Len)
 	*pUbxFrame = ck_b;
 	return true;
 }
-

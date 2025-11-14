@@ -1,12 +1,12 @@
 /*
- * ACC.c
+ * Acc.c
  *
- *  Created on: Nov 10, 2025
+ *  Created on: Nov 14, 2025
  *      Author: Ruan de Jager
  */
 
+#include "Acc.h"
 #include "platform.h"
-#include "acc.h"
 
 // SPI
 #define SPI_READ_NWRITE_BP			7
@@ -212,4 +212,3 @@ void ACC_vTestRegsConfigError(void)
 {
 	_vDeviceRegsConfig( AccRegConfigErr_P, sizeof(AccRegConfigErr_P)/sizeof(acc_reg_config_t) );
 }
-

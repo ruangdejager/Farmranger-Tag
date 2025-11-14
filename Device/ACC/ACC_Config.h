@@ -1,7 +1,7 @@
 /*
- * ACC_Config.h
+ * Acc_Config.h
  *
- *  Created on: Nov 10, 2025
+ *  Created on: Nov 14, 2025
  *      Author: Ruan de Jager
  */
 

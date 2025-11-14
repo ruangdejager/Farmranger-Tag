@@ -1,7 +1,7 @@
 /*
- * GPS_Config.h
+ * Gps_Config.h
  *
- *  Created on: Nov 10, 2025
+ *  Created on: Nov 14, 2025
  *      Author: Ruan de Jager
  */
 

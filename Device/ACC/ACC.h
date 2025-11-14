@@ -1,16 +1,17 @@
 /*
- * ACC.h
+ * Acc.h
  *
- *  Created on: Nov 10, 2025
+ *  Created on: Nov 14, 2025
  *      Author: Ruan de Jager
  */
 
 #ifndef DEVICE_ACC_ACC_H_
 #define DEVICE_ACC_ACC_H_
 
+#include <stdbool.h>
+#include "Acc_Config.h"
+#include "Acc_Driver.h"
 #include "hal_bsp.h"
-#include "ACC_Config.h"
-#include "ACC_Driver.h"
 
 #define ACC_u8ReadReg 		_u8DeviceReadReg
 

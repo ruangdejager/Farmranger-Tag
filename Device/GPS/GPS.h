@@ -1,18 +1,17 @@
 /*
- * GPS.h
+ * Gps.h
  *
- *  Created on: Nov 5, 2025
+ *  Created on: Nov 14, 2025
  *      Author: Ruan de Jager
  */
 
 #ifndef DEVICE_GPS_GPS_H_
 #define DEVICE_GPS_GPS_H_
 
+#include "Gps_Config.h"
+#include "Gps_Driver.h"
 #include "platform.h"
 #include "dbg_log.h"
-
-#include "GPS_driver.h"
-#include "GPS_Config.h"
 
 #include "string.h"
 #include "ctype.h"
