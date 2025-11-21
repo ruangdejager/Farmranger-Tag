@@ -35,8 +35,8 @@
  * @brief Enum to define set wake-up intervals.
  */
 typedef enum {
-	DEVICE_PRIMARY  = 1,
-	DEVICE_SECONDARY
+	DEVICE_SECONDARY = 0,
+	DEVICE_PRIMARY
 } DiscoveryDeviceRole;
 
 /**
@@ -58,5 +58,6 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters);
  */
 void DEVICE_DISCOVERY_vCheckWakeupSchedule(void);
 void DEVICE_DISCOVERY_vSendTS(void);
+DiscoveryDeviceRole DEVICE_DISCOVERY_tGetDeviceRole(void);
 
 #endif /* TASKS_DEVICEDISCOVERY_DEVICEDISCOVERY_H_ */

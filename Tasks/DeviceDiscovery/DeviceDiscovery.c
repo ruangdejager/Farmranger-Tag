@@ -22,7 +22,7 @@
 
 // --- PRIVATE FREE_RTOS RESOURCES ---
 static EventGroupHandle_t xDiscoveryEventGroup;
-DiscoveryDeviceRole tDeviceRole = DEVICE_SECONDARY;
+DiscoveryDeviceRole tDeviceRole;
 BaseType_t status;
 
 // --- PUBLIC FUNCTIONS ---
@@ -42,6 +42,9 @@ void DEVICE_DISCOVERY_vInit(void) {
                 APP_TASK_PRIORITY,
                 NULL);
     configASSERT(status == pdPASS);
+
+    tDeviceRole = (DiscoveryDeviceRole)HAL_GPIO_ReadPin(BSP_VERSION_BIT0_PORT, BSP_VERSION_BIT0_PIN);
+    HAL_GPIO_DeInit(BSP_VERSION_BIT0_PORT, BSP_VERSION_BIT0_PIN);
 
     DBG("DeviceDiscovery: Initialized FreeRTOS resources and created DeviceDiscoveryAppTask.\r\n");
 }
@@ -84,15 +87,12 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters) {
 		DBG("DeviceDiscovery %u: Woke up for discovery.\r\n", LORARADIO_u32GetUniqueId());
 		vTaskDelay(pdMS_TO_TICKS(APP_WAKEUP_BUFFER_MS)); // Wait for buffer time
 
-		if (tDeviceRole == DEVICE_PRIMARY) {
-			DBG("DeviceDiscovery %u: Starting discovery window.\r\n", LORARADIO_u32GetUniqueId());
-		}
-
 		// 2. Clear previous discovery results in MeshNetwork layer
 		MESHNETWORK_vClearDiscoveredNeighbors();
 
 		// 3. Initiate Discovery (only if this is a primary device)
 		if (tDeviceRole == DEVICE_PRIMARY) {
+			DBG("DeviceDiscovery %u: Starting discovery window.\r\n", LORARADIO_u32GetUniqueId());
 			current_dreq_id = xTaskGetTickCount(); // Simple unique ID for this round
 			DBG("DeviceDiscovery %u: Initiating DReq with ID %lu\r\n", LORARADIO_u32GetUniqueId(), current_dreq_id);
 			MESHNETWORK_bStartDiscoveryRound(current_dreq_id, LORARADIO_u32GetUniqueId());
@@ -169,4 +169,9 @@ void DEVICE_DISCOVERY_vSendTS(void)
     DBG("\r\n--- START TIMESYNC ---\r\n");
     uint32_t current_ts_id = xTaskGetTickCount();
     MESHNETWORK_vSendTimesyncMessage(current_ts_id, RTC_u64GetUTC(), MESHNETWORK_tGetCurrentWakeupIntervalEnum());
+}
+
+DiscoveryDeviceRole DEVICE_DISCOVERY_tGetDeviceRole(void)
+{
+    return tDeviceRole;
 }
