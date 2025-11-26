@@ -117,7 +117,7 @@ void GPS_vInit(void)
 
 	// Init UART
 	GPS_DRIVER_vInitGPS(&gps.UartHandle);
-	// UART interface will be enabled/disabled at EG91 powerup/powerdown
+	// UART interface will be enabled/disabled
 	GPS_DRIVER_vEnableUart(&gps.UartHandle);
 	// Drive the 1.8V VCC and 0.9V VCC_RF and VCC_CORE high
 	GPS_DRIVER_vPowerEnHigh();
@@ -161,7 +161,7 @@ void GPS_vRxTask(void *parameters)
 
 	for (;;)
 	{
-		// Wait indefinitely for an RX ISR on the LORA radio
+
 //		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 		vTaskDelay(pdMS_TO_TICKS(1));
 		while ( UART_bReadByte(&gps.UartHandle, &gps.byte) )

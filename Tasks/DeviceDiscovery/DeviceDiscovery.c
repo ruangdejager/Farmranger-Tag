@@ -7,6 +7,7 @@
 #include "LoraRadio.h"
 #include "DeviceDiscovery.h"
 #include "MeshNetwork.h" // Interface to the Mesh Network layer
+#include "Farmranger.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "event_groups.h"
@@ -122,18 +123,28 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters) {
 			} else {
 				DBG("DeviceDiscovery %u: No neighbors discovered or error retrieving.\r\n", LORARADIO_u32GetUniqueId());
 			}
-		}
 
-		// 6. Wait a moment after discovery window has complete. Execute time sync.
-		vTaskDelay(pdMS_TO_TICKS(1000));
+			DEVICE_DISCOVERY_DRIVER_vConnectLogger();
+			// Wait for "Ready" from Farmranger device
+			BSP_LED_On(LED_GREEN);
 
-		if (tDeviceRole == DEVICE_PRIMARY)
-		{
+			DBG("DeviceDiscovery %u: Logger connected.\r\n", LORARADIO_u32GetUniqueId());
+//			DEVICE_DISCOVERY_vSendDiscoveryData();
+
+			// Sync timestamp from farmranger device
+			RTC_vSetUTC(DEVICE_DISCOVERY_DRIVER_u64RequestTS());
+
 			DEVICE_DISCOVERY_vSendTS();
+			vTaskDelay(pdMS_TO_TICKS(5000));
+
+			DEVICE_DISCOVERY_DRIVER_vDisconnectLogger();
+
+			BSP_LED_Off(LED_GREEN);
+
 		}
 
 		// 7. Wait for the time sync to complete
-		vTaskDelay(pdMS_TO_TICKS(5000));
+
 
 		LORARADIO_vEnterDeepSleep();
 		SYSTEM_vActivateDeepSleep();
@@ -175,3 +186,4 @@ DiscoveryDeviceRole DEVICE_DISCOVERY_tGetDeviceRole(void)
 {
     return tDeviceRole;
 }
+

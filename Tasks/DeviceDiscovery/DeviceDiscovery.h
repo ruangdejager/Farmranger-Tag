@@ -39,6 +39,10 @@ typedef enum {
 	DEVICE_PRIMARY
 } DiscoveryDeviceRole;
 
+#define DEVICE_DISCOVERY_DRIVER_vConnectLogger() 			FARMRANGER_vDeviceOn()
+#define DEVICE_DISCOVERY_DRIVER_vDisconnectLogger() 		FARMRANGER_vDeviceOff()
+#define DEVICE_DISCOVERY_DRIVER_u64RequestTS()				FARMRANGER_u64RequestTimestamp()
+
 /**
  * @brief Initializes the Device Discovery application layer.
  * Creates FreeRTOS resources for this layer and configures the MeshNetwork layer.
