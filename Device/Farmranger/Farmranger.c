@@ -8,31 +8,62 @@
 #include "Farmranger.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "semphr.h"
+#include "queue.h"
 
 #include "dbg_log.h"
 
 #include "str.h"
 
 #include <string.h>
+#include <stdlib.h>
 
 #define FR_RX_TASK_PRIORITY      (configMAX_PRIORITIES - 1) // Highest priority
 #define FR_RX_TASK_STACK_SIZE    (configMINIMAL_STACK_SIZE)
 
+#define FR_AT_HANDLER_TASK_PRIORITY      (configMAX_PRIORITIES - 2) // Lower priority than the RX task
+#define FR_AT_HANDLER_TASK_STACK_SIZE    (configMINIMAL_STACK_SIZE*2)
+
 // --- PRIVATE FREE_RTOS TASK HANDLEs ---
 TaskHandle_t Farmranger_vRxTask_handle;
+TaskHandle_t Farmranger_vATHandlerTask_handle;
 
-// Buffer to build NMEA msgs before parsing
-#define FR_RX_BUF_LEN	128
-char acFrRxBuf[FR_RX_BUF_LEN];
-uint8_t u8FrRxBufIdx;
+// Buffer to build msgs before parsing
+#define FR_RX_BUF_LEN 128
+static char acFrRxBuf[FR_RX_BUF_LEN];
+static uint8_t u8FrRxBufIdx = 0;
+
+static SemaphoreHandle_t xLineReadySem;
+static QueueHandle_t xATQueue;
 
 bool bFRDeviceOn;
+
+typedef BaseType_t (*ATParserFn)(const char *line, void *context);
+
+typedef struct {
+    const char *cmd;
+    ATParserFn parser;
+    void *context;
+    char *out;
+    size_t outLen;
+    TaskHandle_t caller;
+    TickType_t timeout;
+} ATReq_t;
 
 struct _farmranger_s
 {
 	hal_uart_t 	UartHandle;
 	uint8_t		byte;
 }farmranger;
+
+BaseType_t FARMRANGER_tATSend(const char *cmd,
+                   ATParserFn parser,
+                   char *out,
+                   size_t outLen,
+                   void *context,
+                   TickType_t timeout);
+void FARMRANGER_vATHandlerTask(void *args);
+BaseType_t FARMRANGER_tParseTimestamp(const char *line, void *ctx);
 
 void FARMRANGER_vInit(void)
 {
@@ -43,6 +74,11 @@ void FARMRANGER_vInit(void)
 	FR_DRIVER_vInitFRDevice(&farmranger.UartHandle);
 	// UART interface will be enabled/disabled at Farmranger device activation
 
+	xLineReadySem = xSemaphoreCreateBinary();
+
+	xATQueue = xQueueCreate(4, sizeof(ATReq_t));
+	configASSERT(xATQueue != NULL);
+
     BaseType_t status;
     status = xTaskCreate(FARMRANGER_vRxTask,
             "FarmrangerRxTask",
@@ -50,6 +86,13 @@ void FARMRANGER_vInit(void)
             NULL,
             FR_RX_TASK_PRIORITY,
 			&Farmranger_vRxTask_handle);
+    status = xTaskCreate(FARMRANGER_vATHandlerTask,
+            "FarmrangerAtHandlerTask",
+            FR_AT_HANDLER_TASK_STACK_SIZE,
+            NULL,
+            FR_AT_HANDLER_TASK_PRIORITY,
+			&Farmranger_vATHandlerTask_handle);
+
     configASSERT(status == pdPASS);
 
 }
@@ -57,26 +100,36 @@ void FARMRANGER_vInit(void)
 void FARMRANGER_vRxTask(void *parameters)
 {
 
-	for (;;)
-	{
+    uint8_t byte;
 
-//		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-		vTaskDelay(pdMS_TO_TICKS(1));
-		while ( UART_bReadByte(&farmranger.UartHandle, &farmranger.byte) )
-		{
-			// Store to buffer
-			acFrRxBuf[u8FrRxBufIdx] = farmranger.byte;
-			u8FrRxBufIdx++;
-			// NULL-terminate in order to eval
-			acFrRxBuf[u8FrRxBufIdx] = 0;
-		}
+    for (;;)
+    {
+        if (UART_bReadByte(&farmranger.UartHandle, &byte))
+        {
+            if (u8FrRxBufIdx < FR_RX_BUF_LEN - 1)
+            {
+                acFrRxBuf[u8FrRxBufIdx++] = byte;
+                acFrRxBuf[u8FrRxBufIdx] = '\0';
+            }
 
-	}
+            if (byte == '\n')
+            {
+                // Signal a complete line is ready
+                xSemaphoreGive(xLineReadySem);
+            }
+        }
+        else
+        {
+            vTaskDelay(pdMS_TO_TICKS(1));
+        }
+    }
 
 }
 
 void FARMRANGER_vDeviceOn(void)
 {
+
+	uint16_t timerCnt = 0;
 
 	if (!bFRDeviceOn)
 	{
@@ -94,8 +147,14 @@ void FARMRANGER_vDeviceOn(void)
 			//
 			//
 			// Yield task while waiting
+
 			vTaskDelay(pdMS_TO_TICKS(1));
-		} while ( NULL == memmem(acFrRxBuf, u8FrRxBufIdx, "RDY\r\n", strlen("RDY\r\n") ) );
+			timerCnt++;
+
+
+		} while ( (NULL == memmem(acFrRxBuf, u8FrRxBufIdx, "RDY\r\n", strlen("RDY\r\n")) ) && (timerCnt < 5000) );
+
+		timerCnt = 0;
 
 		bFRDeviceOn = true;
 	}
@@ -117,19 +176,121 @@ void FARMRANGER_vDeviceOff(void)
 
 }
 
+BaseType_t FARMRANGER_tATSend(const char *cmd,
+                   ATParserFn parser,
+                   char *out,
+                   size_t outLen,
+                   void *context,
+                   TickType_t timeout)
+{
+    ATReq_t req = {
+        .cmd = cmd,
+        .parser = parser,
+        .context = out,
+        .out = out,
+        .outLen = outLen,
+        .caller = xTaskGetCurrentTaskHandle(),
+        .timeout = timeout
+    };
+
+    configASSERT(xATQueue != NULL);
+    if (xQueueSend(xATQueue, &req, pdMS_TO_TICKS(100)) != pdPASS)
+        return pdFAIL;
+
+    uint32_t res = ulTaskNotifyTake(pdTRUE, timeout);
+    return (res > 0) ? pdPASS : pdFAIL;
+}
+
+void FARMRANGER_vATHandlerTask(void *args)
+{
+    ATReq_t req;
+
+    for (;;)
+    {
+        if (xQueueReceive(xATQueue, &req, portMAX_DELAY))
+        {
+            // Clear buffer before sending new command
+            memset(acFrRxBuf, 0, FR_RX_BUF_LEN);
+            u8FrRxBufIdx = 0;
+
+            HAL_UART_u8TxPutBuffer(&farmranger.UartHandle,
+                                   (uint8_t*)req.cmd,
+                                   strlen(req.cmd));
+
+            TickType_t start = xTaskGetTickCount();
+            BaseType_t notified = pdFALSE;
+
+            while ((xTaskGetTickCount() - start) < req.timeout)
+            {
+                if (xSemaphoreTake(xLineReadySem, pdMS_TO_TICKS(50)) == pdTRUE)
+                {
+                    // Check line using parser
+                    if (req.parser(acFrRxBuf, req.context))
+                    {
+                        xTaskNotifyGive(req.caller);
+                        notified = pdTRUE;
+
+                        // FULL BUFFER CLEAR
+                        memset(acFrRxBuf, 0, FR_RX_BUF_LEN);
+                        u8FrRxBufIdx = 0;
+                        break;
+                    }
+
+                    // FULL BUFFER CLEAR for non-matching line
+                    memset(acFrRxBuf, 0, FR_RX_BUF_LEN);
+                    u8FrRxBufIdx = 0;
+                }
+            }
+
+            // Timeout → notify caller, then clear buffer
+            if (!notified)
+                xTaskNotifyGive(req.caller);
+
+            memset(acFrRxBuf, 0, FR_RX_BUF_LEN);
+            u8FrRxBufIdx = 0;
+        }
+    }
+}
+
+BaseType_t FARMRANGER_tParseTimestamp(const char *line, void *ctx)
+{
+    // Expect format: "\r\n1234567890\r\n"
+
+	char *out = (char *)ctx;    // OUT buffer
+
+	if (line[0] == '\r' && line[1] == '\n') {
+		const char *ts = line + 2;
+		const char *end = strstr(ts, "\r\n");
+		if (end) {
+			size_t len = end - ts;
+			memcpy(out, ts, len);
+			out[len] = '\0';
+			return pdTRUE;
+		}
+	}
+	return pdFALSE;
+
+}
+
+
 uint64_t FARMRANGER_u64RequestTimestamp(void)
 {
 
-	uint64_t timestamp = 7200;
+    char tsStr[32] = {0};
+    uint64_t tsValue = 0; // default if fail
 
-	if (!bFRDeviceOn)
-	{
-		FARMRANGER_vDeviceOn();
-	}
+    if (FARMRANGER_tATSend("AT+TSREQ\r\n",
+    			FARMRANGER_tParseTimestamp,
+                tsStr,
+                sizeof(tsStr),
+                NULL,
+                pdMS_TO_TICKS(2000)) == pdPASS)
+    {
+        // Convert ASCII timestamp (e.g., "1701122334") to uint64_t
+        tsValue = strtoull(tsStr, NULL, 10);
+    }
 
-	// Send TS request cmd
-
-	return timestamp;
+    return tsValue;
 
 }
 

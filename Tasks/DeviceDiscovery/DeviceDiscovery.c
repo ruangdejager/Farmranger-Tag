@@ -129,10 +129,19 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters) {
 			BSP_LED_On(LED_GREEN);
 
 			DBG("DeviceDiscovery %u: Logger connected.\r\n", LORARADIO_u32GetUniqueId());
-//			DEVICE_DISCOVERY_vSendDiscoveryData();
+
+			// Send Discovery data to the Farmranger device to be logged
+//			DEVICE_DISCOVERY_vSendDiscoveryData(&discovered_neighbors_buffer, actual_count);
 
 			// Sync timestamp from farmranger device
-			RTC_vSetUTC(DEVICE_DISCOVERY_DRIVER_u64RequestTS());
+	        uint64_t now = DEVICE_DISCOVERY_DRIVER_u64RequestTS();
+	        if (now > 0)
+	        {
+	        	RTC_vSetUTC(now);
+	        } else
+	        {
+	            DBG("Failed to get timestamp\n");
+	        }
 
 			DEVICE_DISCOVERY_vSendTS();
 			vTaskDelay(pdMS_TO_TICKS(5000));
