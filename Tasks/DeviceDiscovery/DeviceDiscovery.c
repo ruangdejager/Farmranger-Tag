@@ -150,6 +150,8 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters) {
 
 			BSP_LED_Off(LED_GREEN);
 
+		} else {
+			vTaskDelay(pdMS_TO_TICKS(10000));
 		}
 
 		// 7. Wait for the time sync to complete
