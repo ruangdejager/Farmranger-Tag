@@ -252,24 +252,34 @@ void FARMRANGER_vATHandlerTask(void *args)
     }
 }
 
+
 BaseType_t FARMRANGER_tParseTimestamp(const char *line, void *ctx)
 {
-    // Expect format: "\r\n1234567890\r\n"
 
-	char *out = (char *)ctx;    // OUT buffer
+	// Expect format: "1234567890\r\n"
 
-	if (line[0] == '\r' && line[1] == '\n') {
-		const char *ts = line + 2;
-		const char *end = strstr(ts, "\r\n");
-		if (end) {
-			size_t len = end - ts;
-			memcpy(out, ts, len);
-			out[len] = '\0';
-			return pdTRUE;
+	char *out = (char *)ctx;
+
+	size_t len = strlen(line);
+
+	// Expect: 10 digits + "\r\n"
+	if (len == 12 && line[10] == '\r' && line[11] == '\n')
+	{
+		// Validate all 10 characters are digits
+		for (int i = 0; i < 10; i++)
+		{
+			if (line[i] < '0' || line[i] > '9')
+				return pdFALSE;
 		}
-	}
-	return pdFALSE;
 
+		// Copy only the 10 digits
+		memcpy(out, line, 10);
+		out[10] = '\0';
+
+		return pdTRUE;
+	}
+
+	return pdFALSE;
 }
 
 
