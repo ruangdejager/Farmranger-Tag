@@ -39,9 +39,10 @@ typedef enum {
 	DEVICE_PRIMARY
 } DiscoveryDeviceRole;
 
-#define DEVICE_DISCOVERY_DRIVER_vConnectLogger() 			FARMRANGER_vDeviceOn()
-#define DEVICE_DISCOVERY_DRIVER_vDisconnectLogger() 		FARMRANGER_vDeviceOff()
-#define DEVICE_DISCOVERY_DRIVER_u64RequestTS()				FARMRANGER_u64RequestTimestamp()
+#define DEVICE_DISCOVERY_DRIVER_bConnectLogger() 						FARMRANGER_bDeviceOn()
+#define DEVICE_DISCOVERY_DRIVER_vDisconnectLogger() 					FARMRANGER_vDeviceOff()
+#define DEVICE_DISCOVERY_DRIVER_u64RequestTS()							FARMRANGER_u64RequestTimestamp()
+#define DEVICE_DISCOVERY_bSendDiscoveryData(items, size)				FARMRANGER_bLogData(items, size)
 
 /**
  * @brief Initializes the Device Discovery application layer.

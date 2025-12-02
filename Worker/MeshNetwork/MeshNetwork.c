@@ -777,6 +777,9 @@ void MESHNETWORK_vSendTimesyncMessage(uint32_t timesync_id, uint32_t utc_timesta
 	meshTimesyncPacket.UtcTimestamp = utc_timestamp;
 	meshTimesyncPacket.WakeUpInterval = wakeup_interval;
 
+	// Add this timesync ID to sender - This avoid the re-transmission of the timesync msg
+	u32LastProcessedTimeSyncID = timesync_id+1;
+
     LoraRadio_Packet_t tx_packet;
 	if(!MESHNETWORK_bEncodeTimesyncMessage(&meshTimesyncPacket, tx_packet.buffer, sizeof(tx_packet.buffer), &tx_packet.length))
 	{

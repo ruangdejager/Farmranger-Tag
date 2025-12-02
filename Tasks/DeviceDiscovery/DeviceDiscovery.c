@@ -124,14 +124,21 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters) {
 				DBG("DeviceDiscovery %u: No neighbors discovered or error retrieving.\r\n", LORARADIO_u32GetUniqueId());
 			}
 
-			DEVICE_DISCOVERY_DRIVER_vConnectLogger();
-			// Wait for "Ready" from Farmranger device
-			BSP_LED_On(LED_GREEN);
+			if(DEVICE_DISCOVERY_DRIVER_bConnectLogger())
+			{
+				// Wait for "Ready" from Farmranger device, true if it successfully received
+				BSP_LED_On(LED_GREEN);
+			}
 
 			DBG("DeviceDiscovery %u: Logger connected.\r\n", LORARADIO_u32GetUniqueId());
 
 			// Send Discovery data to the Farmranger device to be logged
-//			DEVICE_DISCOVERY_vSendDiscoveryData(&discovered_neighbors_buffer, actual_count);
+			if(DEVICE_DISCOVERY_bSendDiscoveryData(discovered_neighbors_buffer, actual_count))
+			{
+				DBG("DeviceDiscovery %u: Log SUCCESS.\r\n", LORARADIO_u32GetUniqueId());
+			} else {
+				DBG("DeviceDiscovery %u: Log FAILED.\r\n", LORARADIO_u32GetUniqueId());
+			}
 
 			// Sync timestamp from farmranger device
 	        uint64_t now = DEVICE_DISCOVERY_DRIVER_u64RequestTS();

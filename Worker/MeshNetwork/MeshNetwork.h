@@ -48,7 +48,7 @@ typedef struct {
     uint8_t     hop_count;
     int16_t     rssi;
     int8_t      snr;
-    TickType_t  last_seen;
+    uint64_t  last_seen;
 } MeshDiscoveredNeighbor_t;
 
 

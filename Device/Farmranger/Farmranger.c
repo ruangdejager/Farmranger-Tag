@@ -15,8 +15,11 @@
 
 #include "str.h"
 
-#include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <inttypes.h>
+
 
 #define FR_RX_TASK_PRIORITY      (configMAX_PRIORITIES - 1) // Highest priority
 #define FR_RX_TASK_STACK_SIZE    (configMINIMAL_STACK_SIZE)
@@ -64,6 +67,8 @@ BaseType_t FARMRANGER_tATSend(const char *cmd,
                    TickType_t timeout);
 void FARMRANGER_vATHandlerTask(void *args);
 BaseType_t FARMRANGER_tParseTimestamp(const char *line, void *ctx);
+BaseType_t FARMRANGER_tParseLoggerReady(const char *line, void *ctx);
+BaseType_t FARMRANGER_tParseOK(const char *line, void *ctx);
 
 void FARMRANGER_vInit(void)
 {
@@ -126,7 +131,7 @@ void FARMRANGER_vRxTask(void *parameters)
 
 }
 
-void FARMRANGER_vDeviceOn(void)
+bool FARMRANGER_bDeviceOn(void)
 {
 
 	uint16_t timerCnt = 0;
@@ -154,12 +159,17 @@ void FARMRANGER_vDeviceOn(void)
 
 		} while ( (NULL == memmem(acFrRxBuf, u8FrRxBufIdx, "RDY\r\n", strlen("RDY\r\n")) ) && (timerCnt < 5000) );
 
-		timerCnt = 0;
-
 		bFRDeviceOn = true;
 	}
 
 	DBG("Farmranger Ready.\r\n");
+
+	if (timerCnt < 5000)
+	{
+		return true;
+	}
+
+	return false;
 
 }
 
@@ -303,4 +313,87 @@ uint64_t FARMRANGER_u64RequestTimestamp(void)
     return tsValue;
 
 }
+
+bool FARMRANGER_bLogData(MeshDiscoveredNeighbor_t *neighbors, uint16_t count)
+{
+    if (count == 0 || neighbors == NULL)
+        return false;
+
+    // 1. Build CSV-style payload
+    static char logBuffer[4096];   // fits ~ 250 entries easily
+    size_t pos = 0;
+
+    for (uint16_t i = 0; i < count; i++)
+    {
+        int n = snprintf(&logBuffer[pos], sizeof(logBuffer) - pos,
+                         "%X,%u,%d,%d,%X\t",
+                         neighbors[i].device_id,
+                         neighbors[i].hop_count,
+                         neighbors[i].rssi,
+                         neighbors[i].snr,
+                         neighbors[i].last_seen);
+
+        if (n <= 0 || n >= (int)(sizeof(logBuffer) - pos))
+            return false; // overflow
+
+        pos += n;
+    }
+
+    // 2. Send AT+LOG=<len>\r\n
+    char cmd[32];
+    snprintf(cmd, sizeof(cmd), "AT+LOG=%u\r\n", (unsigned)pos);
+
+    char respBuf[32] = {0};
+
+    if (FARMRANGER_tATSend(cmd,
+                           FARMRANGER_tParseLoggerReady,
+                           respBuf,
+                           sizeof(respBuf),
+                           respBuf,
+                           pdMS_TO_TICKS(2000)) != pdPASS)
+    {
+        DBG("LogData: No 'Logger ready' received.\r\n");
+        return false;
+    }
+
+    // 3. Send the actual payload (CSV buffer)
+    HAL_UART_u8TxPutBuffer(&farmranger.UartHandle,
+                           (uint8_t*)logBuffer,
+                           pos);
+
+    // 4. Now wait for final OK
+    memset(respBuf, 0, sizeof(respBuf));
+
+    if (FARMRANGER_tATSend("",
+                           FARMRANGER_tParseOK,
+                           respBuf,
+                           sizeof(respBuf),
+                           respBuf,
+                           pdMS_TO_TICKS(2000)) != pdPASS)
+    {
+        DBG("LogData: No final OK received.\r\n");
+        return false;
+    }
+
+    return true;
+}
+
+
+BaseType_t FARMRANGER_tParseLoggerReady(const char *line, void *ctx)
+{
+    if (strcmp(line, "Logger ready\r\n") == 0)
+        return pdTRUE;
+
+    return pdFALSE;
+}
+
+BaseType_t FARMRANGER_tParseOK(const char *line, void *ctx)
+{
+    if (strcmp(line, "OK\r\n") == 0)
+        return pdTRUE;
+
+    return pdFALSE;
+}
+
+
 
