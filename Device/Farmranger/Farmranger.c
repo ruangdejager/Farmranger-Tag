@@ -325,16 +325,17 @@ bool FARMRANGER_bLogData(MeshDiscoveredNeighbor_t *neighbors, uint16_t count)
 
     for (uint16_t i = 0; i < count; i++)
     {
-        int n = snprintf(&logBuffer[pos], sizeof(logBuffer) - pos,
-                         "%X,%u,%d,%d,%X\t",
+        const bool last = (i == count - 1);
+
+        int n = snprintf(&logBuffer[pos],
+                         sizeof(logBuffer) - pos,
+                         last ? "%X,%u,%d\r\n" : "%X,%u,%d\t",
                          neighbors[i].device_id,
                          neighbors[i].hop_count,
-                         neighbors[i].rssi,
-                         neighbors[i].snr,
-                         neighbors[i].last_seen);
+                         neighbors[i].rssi);
 
         if (n <= 0 || n >= (int)(sizeof(logBuffer) - pos))
-            return false; // overflow
+            return false;
 
         pos += n;
     }
