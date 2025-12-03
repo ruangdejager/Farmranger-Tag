@@ -219,13 +219,13 @@ void FARMRANGER_vATHandlerTask(void *args)
     {
         if (xQueueReceive(xATQueue, &req, portMAX_DELAY))
         {
-            // Clear buffer before sending new command
-            memset(acFrRxBuf, 0, FR_RX_BUF_LEN);
-            u8FrRxBufIdx = 0;
 
-            HAL_UART_u8TxPutBuffer(&farmranger.UartHandle,
-                                   (uint8_t*)req.cmd,
-                                   strlen(req.cmd));
+        	if (req.cmd && strlen(req.cmd) > 0)
+        	{
+                HAL_UART_u8TxPutBuffer(&farmranger.UartHandle,
+                                       (uint8_t*)req.cmd,
+                                       strlen(req.cmd));
+        	}
 
             TickType_t start = xTaskGetTickCount();
             BaseType_t notified = pdFALSE;
@@ -359,12 +359,12 @@ bool FARMRANGER_bLogData(MeshDiscoveredNeighbor_t *neighbors, uint16_t count)
     // 3. Send the actual payload (CSV buffer)
     HAL_UART_u8TxPutBuffer(&farmranger.UartHandle,
                            (uint8_t*)logBuffer,
-                           pos);
+						   pos);
 
     // 4. Now wait for final OK
     memset(respBuf, 0, sizeof(respBuf));
 
-    if (FARMRANGER_tATSend("",
+    if (FARMRANGER_tATSend(NULL,
                            FARMRANGER_tParseOK,
                            respBuf,
                            sizeof(respBuf),
