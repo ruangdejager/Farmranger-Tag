@@ -25,7 +25,9 @@
 
 
 void FARMRANGER_vInit(void);
+void FARMRANGER_vUartOnWake(void);
 void FARMRANGER_vRxTask(void *parameters);
+void FARMRANGER_vNotifyOnRX(void);
 bool FARMRANGER_bDeviceOn(void);
 void FARMRANGER_vDeviceOff(void);
 uint64_t FARMRANGER_u64RequestTimestamp(void);

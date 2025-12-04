@@ -179,6 +179,11 @@ void DEVICE_DISCOVERY_vCheckWakeupSchedule(void)
 
 		SYSTEM_vDeactivateDeepSleep();
 
+		if (tDeviceRole == DEVICE_PRIMARY)
+		{
+			FARMRANGER_vUartOnWake();
+		}
+
 #ifdef ENABLE_DBG_UART
 		HAL_UART_vInit();
 		DBG_UART_vInit();

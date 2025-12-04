@@ -102,14 +102,27 @@ void FARMRANGER_vInit(void)
 
 }
 
-void FARMRANGER_vRxTask(void *parameters)
+void FARMRANGER_vUartOnWake(void)
 {
 
+	HAL_UART_vInit();
+	// Init UART
+	FR_DRIVER_vInitFRDevice(&farmranger.UartHandle);
+	// UART interface will be enabled/disabled at Farmranger device activation
+
+}
+
+void FARMRANGER_vRxTask(void *parameters)
+{
     uint8_t byte;
 
     for (;;)
     {
-        if (UART_bReadByte(&farmranger.UartHandle, &byte))
+        // 1. Block until UART ISR notifies us (i.e. a byte arrived)
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        // 2. Drain all available bytes from ring buffer
+        while (UART_bReadByte(&farmranger.UartHandle, &byte))
         {
             if (u8FrRxBufIdx < FR_RX_BUF_LEN - 1)
             {
@@ -117,22 +130,27 @@ void FARMRANGER_vRxTask(void *parameters)
                 acFrRxBuf[u8FrRxBufIdx] = '\0';
             }
 
+            // For the ATcmd handler it notifies the end of a command
             if (byte == '\n')
             {
-                // Signal a complete line is ready
                 xSemaphoreGive(xLineReadySem);
             }
         }
-        else
-        {
-            vTaskDelay(pdMS_TO_TICKS(1));
-        }
     }
-
 }
+
+void FARMRANGER_vNotifyOnRX(void)
+{
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    vTaskNotifyGiveFromISR(Farmranger_vRxTask_handle, &xHigherPriorityTaskWoken);
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
 
 bool FARMRANGER_bDeviceOn(void)
 {
+	// Enable RX Task
+	vTaskResume(Farmranger_vRxTask_handle);
 
 	uint16_t timerCnt = 0;
 
@@ -175,6 +193,8 @@ bool FARMRANGER_bDeviceOn(void)
 
 void FARMRANGER_vDeviceOff(void)
 {
+	// Disable RX Task
+	vTaskSuspend(Farmranger_vRxTask_handle);
 
 	// Enable the uart peripheral
 	FR_DRIVER_vDisableUart(&farmranger.UartHandle);
