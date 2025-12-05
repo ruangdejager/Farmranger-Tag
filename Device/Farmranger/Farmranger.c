@@ -142,7 +142,9 @@ void FARMRANGER_vRxTask(void *parameters)
 void FARMRANGER_vNotifyOnRX(void)
 {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    vTaskNotifyGiveFromISR(Farmranger_vRxTask_handle, &xHigherPriorityTaskWoken);
+    if (Farmranger_vRxTask_handle != NULL) {
+    	vTaskNotifyGiveFromISR(Farmranger_vRxTask_handle, &xHigherPriorityTaskWoken);
+    }
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 

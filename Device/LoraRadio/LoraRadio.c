@@ -192,7 +192,9 @@ uint32_t LORARADIO_u32GetUniqueId (void)
 void LORARADIO_vEventRxDone(void)
 {
 	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-	vTaskNotifyGiveFromISR(LORARADIO_vRxTask_handle, &xHigherPriorityTaskWoken);
+    if (LORARADIO_vRxTask_handle != NULL) {
+    	vTaskNotifyGiveFromISR(LORARADIO_vRxTask_handle, &xHigherPriorityTaskWoken);
+    }
 	portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
@@ -204,7 +206,9 @@ void LORARADIO_vEventRxDone(void)
 void LORARADIO_vEventTxDone(void)
 {
 	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-	vTaskNotifyGiveFromISR(LORARADIO_vTxTask_handle, &xHigherPriorityTaskWoken);
+    if (LORARADIO_vTxTask_handle != NULL) {
+    	vTaskNotifyGiveFromISR(LORARADIO_vTxTask_handle, &xHigherPriorityTaskWoken);
+    }
 	portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 

@@ -23,9 +23,17 @@
 #define MESH_MAX_TTL							4
 #define MESH_MAX_NEIGHBORS_PER_PACKET			5
 #define MESH_MAX_LOCAL_DISCOVERED_DEVICES		16
-#define MESH_BASE_HOP_DELAY_MS					200
-#define MESH_REPLY_JITTER_WINDOW_MS				1000
-#define MESH_DREQ_FLOOD_DELAY_MS				10000
+// Discovery timing: reply windows are hop-ordered.
+// Children (larger hop) reply earlier, parents later.
+// Important: MESH_REPLY_JITTER_WINDOW_MS < MESH_BASE_HOP_DELAY_MS
+#define MESH_BASE_HOP_DELAY_MS                  1500   // 1.5 s separation between hop "bands"
+#define MESH_REPLY_JITTER_WINDOW_MS             500    // jitter inside a band
+
+#define MESH_DREQ_FLOOD_DELAY_MS                10000  // unchanged for now
+
+// Number of DRep transmissions per node per discovery round
+#define MESH_DREP_RETRY_COUNT                   3
+#define MESH_DREP_RETRY_DELAY_MS                200    // spacing between retries once window opens
 
 // --- PACKET STRUCTURES (Common to the mesh protocol) ---
 // --- These are found in the protobuf header files ---
@@ -117,5 +125,8 @@ void MESHNETWORK_vSendTimesyncMessage(uint32_t timesync_id, uint32_t utc_timesta
 uint8_t MESHNETWORK_u8GetWakeupInterval(void); // Returns current interval in minutes
 WakeupInterval MESHNETWORK_tGetCurrentWakeupIntervalEnum(void);
 void MESHNETWORK_vSetWakeupInterval(WakeupInterval new_interval);
+
+uint64_t MESHNETWORK_u64GetLastPrimaryHeardTick(void);
+void MESHNETWORK_vUpdatePrimaryLastSeen(void);
 
 #endif /* WORKER_MESHNETWORK_MESHNETWORK_H_ */
