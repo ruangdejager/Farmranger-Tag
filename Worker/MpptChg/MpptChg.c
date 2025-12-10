@@ -82,21 +82,21 @@ void MPPTCHG_vInit(void)
 	tMpptTmr = xTimerCreate("MPPTtmr",
 							pdMS_TO_TICKS(1000),
 							pdFALSE,
-							(void *)bMpptTmrExpired,
+							(void *)&bMpptTmrExpired,
 							MPPTCHG_vGenericTimerCallback);
 	configASSERT(tMpptTmr != NULL);
 
 	tCheckPGIntervalTmr = xTimerCreate("CheckPGtmr",
 									   pdMS_TO_TICKS(1000),
 									   pdFALSE,
-									   (void *)bCheckPGIntervalTmrExpired,
+									   (void *)&bCheckPGIntervalTmrExpired,
 									   MPPTCHG_vGenericTimerCallback);
 	configASSERT(tCheckPGIntervalTmr != NULL);
 
 	tMpptOffCountdownTmr = xTimerCreate("MPPTOfftmr",
 										pdMS_TO_TICKS(1000),
 										pdFALSE,
-										(void *)bMpptOffCountdownTmrExpired,
+										(void *)&bMpptOffCountdownTmrExpired,
 										MPPTCHG_vGenericTimerCallback);
 	configASSERT(tMpptOffCountdownTmr != NULL);
 
@@ -145,15 +145,19 @@ void MPPTCHG_vPgStateTask(void *pvParameters)
     for (;;)
     {
 
+    	// When the MPPT state goes to CHG_SEL_MPPT_OFF we de-init PG irq lines
+    	// Here we make sure to check PG lines every 60s when not initialized
 		while (1)
 		{
 			if ( bChgPgChangeFlag || (PgState == CHG_PG_STATE_UNSTABLE) ) break;
 			// Incase we are stuck with power good
 			if ( bCheckPGIntervalTmrExpired )
 			{
-				MPPTCHG_vStartTimerSeconds(tCheckPGIntervalTmr, 600);
+				MPPTCHG_vStartTimerSeconds(tCheckPGIntervalTmr, 60);
 				break;
 			}
+			vTaskDelay(pdMS_TO_TICKS(1000));
+
 		}
 
 		if (tMpptState == CHG_SEL_MPPT_OFF) MPPTCHG_DRIVER_vInitGpio();
@@ -187,25 +191,32 @@ void MPPTCHG_vPgStateTask(void *pvParameters)
 void MPPTCHG_ccrMpptTask(void *pvParameters)
 {
 
-	// Frequency of executing mppt switching
-	vTaskDelay(pdMS_TO_TICKS(2000));
+    (void)pvParameters;
 
-	if ( (PgState == CHG_PG_STATE_HIGH) || (PgState == CHG_PG_STATE_UNSTABLE) )
-	{
-		// Once we lowered the charge level we use a timer to set a waiting time before
-		// we try a higher charge. This will ensure longer charging at an optimal level
-		// This happens in the bump down function
-		MPPTCHG_vUpdateMpptState(CHG_BUMP_MPPT_DOWN);
-		// We reset the mppt off countdown timer
-		// When mppt state has been at CHG_SEL_MPPT_20mA for 10 minutes and Power is NOT GOOD -> Enter OFF state
-		if (tMpptState != CHG_SEL_MPPT_5mA)
+    for (;;)
+    {
+
+		// Frequency of executing mppt switching
+		vTaskDelay(pdMS_TO_TICKS(2000));
+
+		if ( (PgState == CHG_PG_STATE_HIGH) || (PgState == CHG_PG_STATE_UNSTABLE) )
 		{
-			MPPTCHG_vStartTimerSeconds(tMpptOffCountdownTmr, 600);
+			// Once we lowered the charge level we use a timer to set a waiting time before
+			// we try a higher charge. This will ensure longer charging at an optimal level
+			// This happens in the bump down function
+			MPPTCHG_vUpdateMpptState(CHG_BUMP_MPPT_DOWN);
+			// We reset the mppt off countdown timer
+			// When mppt state has been at CHG_SEL_MPPT_20mA for 5 minutes and Power is NOT GOOD -> Enter OFF state
+			if (tMpptState != CHG_SEL_MPPT_5mA)
+			{
+				MPPTCHG_vStartTimerSeconds(tMpptOffCountdownTmr, 300);
+			}
+		} else if (PgState == CHG_PG_STATE_LOW)
+		{
+			if (bMpptTmrExpired) MPPTCHG_vUpdateMpptState(CHG_BUMP_MPPT_UP);
 		}
-	} else if (PgState == CHG_PG_STATE_LOW)
-	{
-		if (bMpptTmrExpired) MPPTCHG_vUpdateMpptState(CHG_BUMP_MPPT_UP);
-	}
+
+    }
 
 }
 
@@ -238,7 +249,7 @@ void MPPTCHG_vUpdateMpptState(chg_mppt_bump_t tMpptBump)
 			if (tMpptBump == CHG_BUMP_MPPT_DOWN)
 			{
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_5mA);
-				MPPTCHG_vStartTimerSeconds(tMpptTmr, 60);
+				MPPTCHG_vStartTimerSeconds(tMpptTmr, 10);
 			}
 			if (tMpptBump == CHG_BUMP_MPPT_UP) MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_15mA);
 			break;
@@ -246,7 +257,7 @@ void MPPTCHG_vUpdateMpptState(chg_mppt_bump_t tMpptBump)
 			if (tMpptBump == CHG_BUMP_MPPT_DOWN)
 			{
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_10mA);
-				MPPTCHG_vStartTimerSeconds(tMpptTmr, 60);
+				MPPTCHG_vStartTimerSeconds(tMpptTmr, 10);
 			}
 			if (tMpptBump == CHG_BUMP_MPPT_UP) MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_20mA);
 			break;
@@ -254,7 +265,7 @@ void MPPTCHG_vUpdateMpptState(chg_mppt_bump_t tMpptBump)
 			if (tMpptBump == CHG_BUMP_MPPT_DOWN)
 			{
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_15mA);
-				MPPTCHG_vStartTimerSeconds(tMpptTmr, 60);
+				MPPTCHG_vStartTimerSeconds(tMpptTmr, 10);
 			}
 			if (tMpptBump == CHG_BUMP_MPPT_UP) MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_25mA);
 			break;
@@ -262,7 +273,7 @@ void MPPTCHG_vUpdateMpptState(chg_mppt_bump_t tMpptBump)
 			if (tMpptBump == CHG_BUMP_MPPT_DOWN)
 			{
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_20mA);
-				MPPTCHG_vStartTimerSeconds(tMpptTmr, 60);
+				MPPTCHG_vStartTimerSeconds(tMpptTmr, 10);
 			}
 			if (tMpptBump == CHG_BUMP_MPPT_UP) MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_30mA);
 			break;
@@ -270,7 +281,7 @@ void MPPTCHG_vUpdateMpptState(chg_mppt_bump_t tMpptBump)
 			if (tMpptBump == CHG_BUMP_MPPT_DOWN)
 			{
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_25mA);
-				MPPTCHG_vStartTimerSeconds(tMpptTmr, 60);
+				MPPTCHG_vStartTimerSeconds(tMpptTmr, 10);
 			}
 			if (tMpptBump == CHG_BUMP_MPPT_UP) MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_35mA);
 			break;
@@ -278,7 +289,7 @@ void MPPTCHG_vUpdateMpptState(chg_mppt_bump_t tMpptBump)
 			if (tMpptBump == CHG_BUMP_MPPT_DOWN)
 			{
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_30mA);
-				MPPTCHG_vStartTimerSeconds(tMpptTmr, 60);
+				MPPTCHG_vStartTimerSeconds(tMpptTmr, 10);
 			}
 			if (tMpptBump == CHG_BUMP_MPPT_UP) MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_40mA);
 			break;
@@ -286,7 +297,7 @@ void MPPTCHG_vUpdateMpptState(chg_mppt_bump_t tMpptBump)
 			if (tMpptBump == CHG_BUMP_MPPT_DOWN)
 			{
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_35mA);
-				MPPTCHG_vStartTimerSeconds(tMpptTmr, 60);
+				MPPTCHG_vStartTimerSeconds(tMpptTmr, 10);
 			}
 			if (tMpptBump == CHG_BUMP_MPPT_UP) return;
 			break;

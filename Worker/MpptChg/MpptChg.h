@@ -36,6 +36,8 @@ typedef enum chg_pg_state_t {
 	CHG_PG_STATE_UNSTABLE
 } chg_pg_state_t;
 
+void MPPTCHG_vInit(void);
+
 void MPPTCHG_vPinChangeCallback(void);
 
 void MPPTCHG_vIncMpptStateCounters(void);
