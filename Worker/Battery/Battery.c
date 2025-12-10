@@ -48,6 +48,8 @@ static void BAT_vSampleIntervalCallback(TimerHandle_t xTimer);
 
 void BAT_vInit(void)
 {
+
+#warning We need to change to hardware timers, software timers like this is pause when device goes to sleep
 	tBatSampleIntervalTmr = xTimerCreate("BatSampleIntervalTmr",
 									   pdMS_TO_TICKS(BAT_SAMPLE_INTERVAL*1000),
 									   pdTRUE,

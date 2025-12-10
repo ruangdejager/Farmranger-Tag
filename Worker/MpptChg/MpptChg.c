@@ -13,7 +13,7 @@
 #include "timers.h"
 
 #include "dbg_log.h"
-
+#include <limits.h>
 #include <stdbool.h>
 
 // --- PRIVATE DEFINES ---
@@ -151,12 +151,21 @@ void MPPTCHG_vPgStateTask(void *pvParameters)
 		{
 			if ( bChgPgChangeFlag || (PgState == CHG_PG_STATE_UNSTABLE) ) break;
 			// Incase we are stuck with power good
+			#warning We need to change to hardware timers, software timers like this is pause when device goes to sleep
 			if ( bCheckPGIntervalTmrExpired )
 			{
 				MPPTCHG_vStartTimerSeconds(tCheckPGIntervalTmr, 60);
 				break;
 			}
-			vTaskDelay(pdMS_TO_TICKS(1000));
+
+	        // Wait 1s notification from PLATFORM module bliptask
+			// Todo: Use events for 1s actions in the future
+	        xTaskNotifyWait(
+	            0x00,            // Don't clear bits on entry
+	            ULONG_MAX,       // Clear all bits on exit
+	            NULL,// Where the value is stored
+	            portMAX_DELAY
+	        );
 
 		}
 
