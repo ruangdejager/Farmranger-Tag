@@ -51,7 +51,7 @@ volatile bool bChgPgChangeFlag;
 chg_mppt_state_t tMpptState;
 
 void MPPTCHG_vPgStateTask(void *pvParameters);
-void MPPTCHG_ccrMpptTask(void *pvParameters);
+void MPPTCHG_vMpptTask(void *pvParameters);
 
 void MPPTCHG_vUpdateMpptState(chg_mppt_bump_t tMpptBump);
 void MPPTCHG_vSetMpptChgLevel(chg_mppt_state_t tMpptChgLevelSet);
@@ -111,7 +111,7 @@ void MPPTCHG_vInit(void)
 				&MPPTCHG_vPgStateTask_handle);
     configASSERT(status == pdPASS);
 
-    status = xTaskCreate(MPPTCHG_ccrMpptTask,
+    status = xTaskCreate(MPPTCHG_vMpptTask,
                 "MpptTask",
 				MPPT_TASK_STACK_SIZE,
                 NULL,
@@ -188,7 +188,7 @@ void MPPTCHG_vPgStateTask(void *pvParameters)
  * Main state machine for solar manual mppt charging
  *
  */
-void MPPTCHG_ccrMpptTask(void *pvParameters)
+void MPPTCHG_vMpptTask(void *pvParameters)
 {
 
     (void)pvParameters;
