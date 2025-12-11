@@ -12,6 +12,7 @@
 #include "task.h"
 #include "timers.h"
 
+#include "hard_timers.h"
 #include "dbg_log.h"
 #include <limits.h>
 #include <stdbool.h>
@@ -24,13 +25,11 @@
 TaskHandle_t MPPTCHG_vPgStateTask_handle;
 TaskHandle_t MPPTCHG_vMpptTask_handle;
 
-TimerHandle_t tMpptTmr;
-TimerHandle_t tCheckPGIntervalTmr;
-TimerHandle_t tMpptOffCountdownTmr;
-
-volatile bool bMpptTmrExpired = true;
-volatile bool bCheckPGIntervalTmrExpired = true;
-volatile bool bMpptOffCountdownTmrExpired = true;
+//TimerHandle_t tMpptTmr;
+//TimerHandle_t tCheckPGIntervalTmr;
+//
+//volatile bool bMpptTmrExpired = true;
+//volatile bool bCheckPGIntervalTmrExpired = true;
 
 volatile bool PgStateChange;
 
@@ -50,6 +49,10 @@ volatile bool bChgPgChangeFlag;
 // The state of charge when in mppt mode
 chg_mppt_state_t tMpptState;
 
+TIMERS_timer_t tMpptTmr;
+TIMERS_timer_t tCheckPGIntervalTmr;
+TIMERS_timer_t tMpptOffCountdownTmr;
+
 void MPPTCHG_vPgStateTask(void *pvParameters);
 void MPPTCHG_vMpptTask(void *pvParameters);
 
@@ -57,8 +60,10 @@ void MPPTCHG_vUpdateMpptState(chg_mppt_bump_t tMpptBump);
 void MPPTCHG_vSetMpptChgLevel(chg_mppt_state_t tMpptChgLevelSet);
 chg_mppt_state_t MPPTCHG_tGetMpptChgLevel(void);
 
+/*
 static void MPPTCHG_vGenericTimerCallback(TimerHandle_t xTimer);
 void MPPTCHG_vStartTimerSeconds(TimerHandle_t tmr, uint32_t seconds);
+*/
 
 
 /**
@@ -79,6 +84,7 @@ void MPPTCHG_vInit(void)
 	/* Create timers with dummy period (1 second).
 	   We set real period on start. Auto-reload = pdFALSE. */
 
+	/*
 	tMpptTmr = xTimerCreate("MPPTtmr",
 							pdMS_TO_TICKS(1000),
 							pdFALSE,
@@ -92,15 +98,16 @@ void MPPTCHG_vInit(void)
 									   (void *)&bCheckPGIntervalTmrExpired,
 									   MPPTCHG_vGenericTimerCallback);
 	configASSERT(tCheckPGIntervalTmr != NULL);
+	*/
 
-	tMpptOffCountdownTmr = xTimerCreate("MPPTOfftmr",
-										pdMS_TO_TICKS(1000),
-										pdFALSE,
-										(void *)&bMpptOffCountdownTmrExpired,
-										MPPTCHG_vGenericTimerCallback);
-	configASSERT(tMpptOffCountdownTmr != NULL);
+    TIMERS_vTimerCreate(&tMpptTmr, TIMER_RTC_TICK);
+    TIMERS_vTimerStart(&tMpptTmr, 0);
 
-	MPPTCHG_vStartTimerSeconds(tMpptOffCountdownTmr, 30);
+    TIMERS_vTimerCreate(&tCheckPGIntervalTmr, TIMER_RTC_TICK);
+    TIMERS_vTimerStart(&tCheckPGIntervalTmr, 0);
+
+	TIMERS_vTimerCreate(&tMpptOffCountdownTmr, TIMER_RTC_TICK);
+	TIMERS_vTimerStart(&tMpptOffCountdownTmr, 30);
 
     BaseType_t status;
     status = xTaskCreate(MPPTCHG_vPgStateTask,
@@ -141,6 +148,7 @@ void MPPTCHG_vPgStateTask(void *pvParameters)
     (void)pvParameters;
 
     bool bChgPgChange;
+    bool bWasSleepActive = false;
 
     for (;;)
     {
@@ -152,9 +160,10 @@ void MPPTCHG_vPgStateTask(void *pvParameters)
 			if ( bChgPgChangeFlag || (PgState == CHG_PG_STATE_UNSTABLE) ) break;
 			// Incase we are stuck with power good
 			#warning We need to change to hardware timers, software timers like this is pause when device goes to sleep
-			if ( bCheckPGIntervalTmrExpired )
+			if ( TIMERS_bTimerIsExpired(&tCheckPGIntervalTmr) )
 			{
-				MPPTCHG_vStartTimerSeconds(tCheckPGIntervalTmr, 60);
+//				MPPTCHG_vStartTimerSeconds(tCheckPGIntervalTmr, 60);
+				TIMERS_vTimerStart(&tCheckPGIntervalTmr, 30);
 				break;
 			}
 
@@ -169,11 +178,16 @@ void MPPTCHG_vPgStateTask(void *pvParameters)
 
 		}
 
+		bWasSleepActive = SYSTEM_bIsDeepSleepActive();
+		if (bWasSleepActive) {
+			SYSTEM_vDeactivateDeepSleep();
+		}
+
 		if (tMpptState == CHG_SEL_MPPT_OFF) MPPTCHG_DRIVER_vInitGpio();
 
 		// Eval flag, update PG status
 		// Wait out settling time
-		vTaskDelay(pdMS_TO_TICKS(100));
+		vTaskDelay(pdMS_TO_TICKS(10));
 
 		// Check PG on-change flag; no need to do it thread-safe.
 		bChgPgChange = bChgPgChangeFlag;
@@ -187,6 +201,10 @@ void MPPTCHG_vPgStateTask(void *pvParameters)
 		}
 
 		if (tMpptState == CHG_SEL_MPPT_OFF) MPPTCHG_DRIVER_vDeinitGpio();
+
+		if (bWasSleepActive) {
+			SYSTEM_vActivateDeepSleep();
+		}
     }
 
     vTaskDelete(NULL);
@@ -206,24 +224,40 @@ void MPPTCHG_vMpptTask(void *pvParameters)
     {
 
 		// Frequency of executing mppt switching
-		vTaskDelay(pdMS_TO_TICKS(2000));
+//		vTaskDelay(pdMS_TO_TICKS(2000));
+        // Wait 1s notification from PLATFORM module bliptask
+		// Todo: Use events for 1s actions in the future
+        xTaskNotifyWait(
+            0x00,            // Don't clear bits on entry
+            ULONG_MAX,       // Clear all bits on exit
+            NULL,// Where the value is stored
+            portMAX_DELAY
+        );
 
-		if ( (PgState == CHG_PG_STATE_HIGH) || (PgState == CHG_PG_STATE_UNSTABLE) )
-		{
-			// Once we lowered the charge level we use a timer to set a waiting time before
-			// we try a higher charge. This will ensure longer charging at an optimal level
-			// This happens in the bump down function
-			MPPTCHG_vUpdateMpptState(CHG_BUMP_MPPT_DOWN);
-			// We reset the mppt off countdown timer
-			// When mppt state has been at CHG_SEL_MPPT_20mA for 5 minutes and Power is NOT GOOD -> Enter OFF state
-			if (tMpptState != CHG_SEL_MPPT_5mA)
+        if (TIMERS_bTimerIsExpired(&tMpptTmr))
+        {
+
+			if ( (PgState == CHG_PG_STATE_HIGH) || (PgState == CHG_PG_STATE_UNSTABLE) )
 			{
-				MPPTCHG_vStartTimerSeconds(tMpptOffCountdownTmr, 300);
+				// Once we lowered the charge level we use a timer to set a waiting time before
+				// we try a higher charge. This will ensure longer charging at an optimal level
+				// This happens in the bump down function
+				MPPTCHG_vUpdateMpptState(CHG_BUMP_MPPT_DOWN);
+				// We reset the mppt off countdown timer
+				// When mppt state has been at CHG_SEL_MPPT_20mA for 5 minutes and Power is NOT GOOD -> Enter OFF state
+				if (tMpptState != CHG_SEL_MPPT_5mA)
+				{
+					TIMERS_vTimerStart(&tMpptOffCountdownTmr, 15);
+				}
+
+			} else if (PgState == CHG_PG_STATE_LOW) {
+
+				MPPTCHG_vUpdateMpptState(CHG_BUMP_MPPT_UP);
 			}
-		} else if (PgState == CHG_PG_STATE_LOW)
-		{
-			if (bMpptTmrExpired) MPPTCHG_vUpdateMpptState(CHG_BUMP_MPPT_UP);
-		}
+
+			TIMERS_vTimerStart(&tMpptTmr, 2);
+
+        }
 
     }
 
@@ -242,71 +276,78 @@ void MPPTCHG_vUpdateMpptState(chg_mppt_bump_t tMpptBump)
 				MPPTCHG_DRIVER_vInitGpio();
 				// Forces a check on PG
 				PgState = CHG_PG_STATE_UNSTABLE;
-				MPPTCHG_vStartTimerSeconds(tMpptOffCountdownTmr, 30);
+				TIMERS_vTimerStart(&tMpptOffCountdownTmr, 30);
 			}
 			break;
 		case CHG_SEL_MPPT_5mA:
-			if (tMpptBump == CHG_BUMP_MPPT_DOWN && bMpptOffCountdownTmrExpired)
+			if (tMpptBump == CHG_BUMP_MPPT_DOWN && TIMERS_bTimerIsExpired(&tMpptOffCountdownTmr))
 			{
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_OFF);
 				// De-Init the PG line
 				MPPTCHG_DRIVER_vDeinitGpio();
 			}
-			if (tMpptBump == CHG_BUMP_MPPT_UP) MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_10mA);
+			if (tMpptBump == CHG_BUMP_MPPT_UP) {
+				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_10mA);
+			}
 			break;
 		case CHG_SEL_MPPT_10mA:
 			if (tMpptBump == CHG_BUMP_MPPT_DOWN)
 			{
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_5mA);
-				MPPTCHG_vStartTimerSeconds(tMpptTmr, 10);
 			}
-			if (tMpptBump == CHG_BUMP_MPPT_UP) MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_15mA);
+			if (tMpptBump == CHG_BUMP_MPPT_UP) {
+				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_15mA);
+			}
 			break;
 		case CHG_SEL_MPPT_15mA:
 			if (tMpptBump == CHG_BUMP_MPPT_DOWN)
 			{
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_10mA);
-				MPPTCHG_vStartTimerSeconds(tMpptTmr, 10);
 			}
-			if (tMpptBump == CHG_BUMP_MPPT_UP) MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_20mA);
+			if (tMpptBump == CHG_BUMP_MPPT_UP) {
+				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_20mA);
+			}
 			break;
 		case CHG_SEL_MPPT_20mA:
 			if (tMpptBump == CHG_BUMP_MPPT_DOWN)
 			{
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_15mA);
-				MPPTCHG_vStartTimerSeconds(tMpptTmr, 10);
 			}
-			if (tMpptBump == CHG_BUMP_MPPT_UP) MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_25mA);
+			if (tMpptBump == CHG_BUMP_MPPT_UP) {
+				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_25mA);
+			}
 			break;
 		case CHG_SEL_MPPT_25mA:
 			if (tMpptBump == CHG_BUMP_MPPT_DOWN)
 			{
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_20mA);
-				MPPTCHG_vStartTimerSeconds(tMpptTmr, 10);
 			}
-			if (tMpptBump == CHG_BUMP_MPPT_UP) MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_30mA);
+			if (tMpptBump == CHG_BUMP_MPPT_UP) {
+				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_30mA);
+			}
 			break;
 		case CHG_SEL_MPPT_30mA:
 			if (tMpptBump == CHG_BUMP_MPPT_DOWN)
 			{
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_25mA);
-				MPPTCHG_vStartTimerSeconds(tMpptTmr, 10);
 			}
-			if (tMpptBump == CHG_BUMP_MPPT_UP) MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_35mA);
+			if (tMpptBump == CHG_BUMP_MPPT_UP) {
+				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_35mA);
+			}
 			break;
 		case CHG_SEL_MPPT_35mA:
 			if (tMpptBump == CHG_BUMP_MPPT_DOWN)
 			{
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_30mA);
-				MPPTCHG_vStartTimerSeconds(tMpptTmr, 10);
 			}
-			if (tMpptBump == CHG_BUMP_MPPT_UP) MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_40mA);
+			if (tMpptBump == CHG_BUMP_MPPT_UP) {
+				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_40mA);
+			}
 			break;
 		case CHG_SEL_MPPT_40mA:
 			if (tMpptBump == CHG_BUMP_MPPT_DOWN)
 			{
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_35mA);
-				MPPTCHG_vStartTimerSeconds(tMpptTmr, 10);
 			}
 			if (tMpptBump == CHG_BUMP_MPPT_UP) return;
 			break;
@@ -375,6 +416,7 @@ chg_mppt_state_t MPPTCHG_tGetMpptChgLevel(void)
 	return tMpptState;
 }
 
+/*
 void MPPTCHG_vStartTimerSeconds(TimerHandle_t tmr, uint32_t seconds)
 {
     volatile bool *flag =
@@ -382,7 +424,7 @@ void MPPTCHG_vStartTimerSeconds(TimerHandle_t tmr, uint32_t seconds)
 
     *flag = false;   // reset before starting
 
-    /* Change timer period to "seconds" */
+    // Change timer period to "seconds"
     xTimerChangePeriod(tmr, pdMS_TO_TICKS(seconds * 1000), 0);
 }
 
@@ -393,6 +435,7 @@ static void MPPTCHG_vGenericTimerCallback(TimerHandle_t xTimer)
 
     *flag = true;    // mark expired
 }
+*/
 
 void MPPTCHG_vIncMpptStateCounters(void)
 {
