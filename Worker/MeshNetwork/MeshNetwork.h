@@ -33,7 +33,7 @@
 
 // Number of DRep transmissions per node per discovery round
 #define MESH_DREP_RETRY_COUNT                   3
-#define MESH_DREP_RETRY_DELAY_MS                200    // spacing between retries once window opens
+#define MESH_DREP_RETRY_DELAY_MS                250    // spacing between retries once window opens
 
 // --- PACKET STRUCTURES (Common to the mesh protocol) ---
 // --- These are found in the protobuf header files ---

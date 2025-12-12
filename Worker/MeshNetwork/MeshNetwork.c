@@ -70,6 +70,7 @@ typedef struct {
 static DiscoveryCache_t CurrentDiscoveryCache;
 static uint32_t u32LastProcessedDReqID = 0; // To prevent processing old DReqs
 static uint32_t u32LastProcessedTimeSyncID = 0; // To prevent processing old TS messages
+static bool bFirstEverTimeSync = true; // We need to immediately go to sleep after first timesync to not burn unnecessary power
 
 // ---- Primary-heard tracking (used for recovery via App layer) ----
 static uint64_t u64LastPrimaryHeardTick = 0;
@@ -81,7 +82,7 @@ static uint8_t u8MeshDiscoveredNeighborsCount = 0;
 static SemaphoreHandle_t xMeshNeighborTableMutex; // Protects mesh_discovered_neighbors
 
 // --- STATIC VARIABLES FOR WAKEUP INTERVAL ---
-static WakeupInterval tCurrentWakeupInterval = WAKEUP_INTERVAL_15_MIN; // Default to 60 minutes
+static WakeupInterval tCurrentWakeupInterval = WAKEUP_INTERVAL_60_MIN; // Default to 60 minutes
 // Array to map enum to actual millisecond values
 static const uint8_t u8CurrentWakeupIntervalMin[] = {
     [WAKEUP_INTERVAL_15_MIN]  = 15, // 15 minutes
@@ -716,6 +717,12 @@ void MESHNETWORK_vHandleTimeSyncMessage(const TimeSyncMessage *time_sync_msg)
         MESHNETWORK_vSendTimesyncMessage(time_sync_msg->TimesyncID,
                                          time_sync_msg->UtcTimestamp,
                                          time_sync_msg->WakeUpInterval);
+
+//        if (bFirstEverTimeSync) {
+//		    LORARADIO_vEnterDeepSleep();
+//		    SYSTEM_vActivateDeepSleep();
+//		    bFirstEverTimeSync = false;
+//        }
 
     } else {
         DBG("MeshNetwork: Ignored old/duplicate TimeSync (ID: %lu).\r\n", time_sync_msg->TimesyncID);

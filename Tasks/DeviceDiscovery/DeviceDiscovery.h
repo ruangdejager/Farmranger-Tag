@@ -17,7 +17,7 @@
 #define APP_IS_PRIMARY_DEVICE       (APP_DEVICE_ID >= 1 && APP_DEVICE_ID <= 3) // Define if this device is a primary initiator
 
 // Discovery Timing
-#define APP_WAKEUP_BUFFER_MS        (5 * 1000) // 30 seconds buffer after synchronized wake-up
+#define APP_WAKEUP_BUFFER_MS        (10 * 1000) // 30 seconds buffer after synchronized wake-up
 #define APP_DISCOVERY_WINDOW_MS     (15 * 1000) // 60 seconds for the entire discovery process
 
 // Mesh Network Parameters (passed to MeshNetwork layer)

@@ -13,6 +13,7 @@
 #include "platform.h"
 #include "dbg_log.h"
 #include "math_func.h"
+#include "hard_timers.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -29,11 +30,12 @@
 #define BAT_SAMPLETASK_STACK_SIZE	(configMINIMAL_STACK_SIZE)
 #define BAT_PURGETASK_PRIORITY   	(configMAX_PRIORITIES - 4)
 #define BAT_PURGETASK_STACK_SIZE	(configMINIMAL_STACK_SIZE)
+#define BAT_SCHEDULETASK_PRIORITY   (configMAX_PRIORITIES - 4)
+#define BAT_SCHEDULETASK_STACK_SIZE	(configMINIMAL_STACK_SIZE)
 
 TaskHandle_t BAT_vSampleTask_handle;
 TaskHandle_t BAT_vBufferPurgeTask_handle;
-
-TimerHandle_t tBatSampleIntervalTmr;
+TaskHandle_t BAT_vCheckSampleCheduleTask_handle;
 
 //! Averaging buffer and idx
 uint16_t au16BatAvgBuf[BAT_AVG_FACTOR];
@@ -41,21 +43,18 @@ uint8_t u8BatAvgIdx;
 //! Variable to store previous sample for delta limiting
 uint16_t u16BatPreviousSample;
 
+static TIMERS_timer_t tBatSampleIntervalTmr;
+
 //Function definition
 void BAT_vSampleTask(void *pvParameters);
 void BAT_vBufferPurgeTask(void *pvParameters);
-static void BAT_vSampleIntervalCallback(TimerHandle_t xTimer);
+void BAT_vCheckSampleCheduleTask(void *pvParameters);
 
 void BAT_vInit(void)
 {
 
-#warning We need to change to hardware timers, software timers like this is pause when device goes to sleep
-	tBatSampleIntervalTmr = xTimerCreate("BatSampleIntervalTmr",
-									   pdMS_TO_TICKS(BAT_SAMPLE_INTERVAL*1000),
-									   pdTRUE,
-									   NULL,
-									   BAT_vSampleIntervalCallback);
-	configASSERT(tBatSampleIntervalTmr != NULL);
+    TIMERS_vTimerCreate(&tBatSampleIntervalTmr, TIMER_RTC_TICK);
+    TIMERS_vTimerStart(&tBatSampleIntervalTmr, BAT_SAMPLE_INTERVAL);
 
     BaseType_t status;
 
@@ -67,7 +66,13 @@ void BAT_vInit(void)
 				&BAT_vSampleTask_handle);
     configASSERT(status == pdPASS);
 
-    xTimerStart(tBatSampleIntervalTmr, 0);
+    status = xTaskCreate(BAT_vCheckSampleCheduleTask,
+                "CheckSampleCheduleTask",
+				BAT_SCHEDULETASK_STACK_SIZE,
+                NULL,
+				BAT_SCHEDULETASK_PRIORITY,
+				&BAT_vCheckSampleCheduleTask_handle);
+    configASSERT(status == pdPASS);
 
     // Run the purge task immediately at bat init
     BAT_vPurgeBuffer();
@@ -83,6 +88,8 @@ void BAT_vSampleTask(void *pvParameters)
 	uint8_t u8DelayMs;
 	uint16_t u16AdcResult;
 
+	bool bWasSleepActive = false;
+
     for(;;)
     {
         // Wait for a notification indefinitely
@@ -92,6 +99,12 @@ void BAT_vSampleTask(void *pvParameters)
             &ulNotifiedValue,// Where the value is stored
             portMAX_DELAY
         );
+
+		bWasSleepActive = SYSTEM_bIsDeepSleepActive();
+		if (bWasSleepActive) {
+			BSP_LED_On(LED_RED);
+			SYSTEM_vDeactivateDeepSleep();
+		}
 
         bDeltaLimit = ulNotifiedValue & BAT_NOTIFY_DELTA_LIMIT;
         bPurge = ulNotifiedValue & BAT_NOTIFY_PURGE_REQUEST;
@@ -167,6 +180,9 @@ void BAT_vSampleTask(void *pvParameters)
 		    }
 		}
 
+		if (bWasSleepActive) {
+			SYSTEM_vActivateDeepSleep();
+		}
 
     }
 
@@ -209,6 +225,38 @@ void BAT_vBufferPurgeTask(void *pvParameters)
     vTaskDelete(NULL);
 }
 
+void BAT_vCheckSampleCheduleTask(void *pvParameters)
+{
+
+	for (;;)
+	{
+
+		// Wait 1s notification from PLATFORM module bliptask
+		// Todo: Use events for 1s actions in the future
+		xTaskNotifyWait(
+			0x00,            // Don't clear bits on entry
+			ULONG_MAX,       // Clear all bits on exit
+			NULL,// Where the value is stored
+			portMAX_DELAY
+		);
+
+		if (TIMERS_bTimerIsExpired(&tBatSampleIntervalTmr))
+		{
+			// Notify sample task with delta limiting
+			if(!SYSTEM_bIsDeepSleepActive()) {
+				xTaskNotify(BAT_vSampleTask_handle, BAT_NOTIFY_DELTA_LIMIT, eSetBits);
+			} else {
+				BSP_LED_On(LED_RED);
+			}
+
+			TIMERS_vTimerStart(&tBatSampleIntervalTmr, BAT_SAMPLE_INTERVAL);
+		}
+
+	}
+
+    vTaskDelete(NULL);
+}
+
 /**
  * @brief	Immediately fill the battery sample buffer
  *
@@ -245,14 +293,6 @@ void BAT_vPurgeBuffer(void)
     taskENTER_CRITICAL();
     BAT_vBufferPurgeTask_handle = purgeHandle;
     taskEXIT_CRITICAL();
-}
-
-
-
-static void BAT_vSampleIntervalCallback(TimerHandle_t xTimer)
-{
-	// Notify sample task with delta limiting
-	xTaskNotify(BAT_vSampleTask_handle, BAT_NOTIFY_DELTA_LIMIT, eSetBits);
 }
 
 /**
