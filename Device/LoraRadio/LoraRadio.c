@@ -71,6 +71,8 @@ void LORARADIO_vInit(void) {
     LORARADIO_DRIVER_vInit(u8DevEUI); // Initialize LoRa hardware
     LORARADIO_DRIVER_vEnterRxMode(0x00); // Start listening
 
+    DBG("\r\nDevice ID: %X\r\n", LORARADIO_u32GetUniqueId());
+
 }
 
 // Function that exposes a read from the rx queue
@@ -179,9 +181,10 @@ void LORARADIO_vTxTask(void *parameters)
 
 uint32_t LORARADIO_u32GetUniqueId (void)
 {
-	return ((uint32_t)u8DevEUI[0] << 16) |
-	           ((uint32_t)u8DevEUI[1] << 8)  |
-	           ((uint32_t)u8DevEUI[2]);
+	return ((uint32_t)u8DevEUI[1] << 24) |
+	           ((uint32_t)u8DevEUI[3] << 16)  |
+			   ((uint32_t)u8DevEUI[4] << 8)  |
+	           ((uint32_t)u8DevEUI[5]);
 }
 
 /**
