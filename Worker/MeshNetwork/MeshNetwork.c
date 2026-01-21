@@ -74,6 +74,7 @@ static bool bFirstEverTimeSync = true; // We need to immediately go to sleep aft
 
 // ---- Primary-heard tracking (used for recovery via App layer) ----
 static uint64_t u64LastPrimaryHeardTick = 0;
+static uint64_t u64LastProcessedTimeSyncUTC = 0;
 
 // Discovered neighbors for the application layer
 #define MESH_MAX_GLOBAL_NEIGHBORS (250) // Max entries in the primary device's global table
@@ -82,7 +83,7 @@ static uint8_t u8MeshDiscoveredNeighborsCount = 0;
 static SemaphoreHandle_t xMeshNeighborTableMutex; // Protects mesh_discovered_neighbors
 
 // --- STATIC VARIABLES FOR WAKEUP INTERVAL ---
-static WakeupInterval tCurrentWakeupInterval = WAKEUP_INTERVAL_60_MIN; // Default to 60 minutes
+static WakeupInterval tCurrentWakeupInterval = WAKEUP_INTERVAL_15_MIN; // Default to 60 minutes
 // Array to map enum to actual millisecond values
 static const uint8_t u8CurrentWakeupIntervalMin[] = {
     [WAKEUP_INTERVAL_15_MIN]  = 15, // 15 minutes
@@ -92,7 +93,7 @@ static const uint8_t u8CurrentWakeupIntervalMin[] = {
 };
 
 uint8_t MESHNETWORK_u8GetWakeupInterval(void) {
-    if (tCurrentWakeupInterval < WAKEUP_INTERVAL_MAX_COUNT) {
+    if (tCurrentWakeupInterval <= WAKEUP_INTERVAL_MAX_COUNT) {
         return u8CurrentWakeupIntervalMin[tCurrentWakeupInterval];
     }
     return u8CurrentWakeupIntervalMin[WAKEUP_INTERVAL_60_MIN]; // Default or error value
@@ -695,18 +696,20 @@ static void MESHNETWORK_vHandleDRep(const MeshDRepPacket *drep_packet) {
 
 void MESHNETWORK_vHandleTimeSyncMessage(const TimeSyncMessage *time_sync_msg)
 {
-	// ---- Update primary-heard tick ----
-	if (DEVICE_DISCOVERY_tGetDeviceRole() == DEVICE_SECONDARY)
-	{
-		MESHNETWORK_vUpdatePrimaryLastSeen();
-	}
 
     // Check if this TimeSyncID has been processed before
-    if (time_sync_msg->TimesyncID > u32LastProcessedTimeSyncID) {
+    if (time_sync_msg->UtcTimestamp > u64LastProcessedTimeSyncUTC) {
+
+    	// ---- Update primary-heard tick ----
+    	if (DEVICE_DISCOVERY_tGetDeviceRole() == DEVICE_SECONDARY)
+    	{
+    		MESHNETWORK_vUpdatePrimaryLastSeen();
+    	}
+
         DBG("MeshNetwork: New TimeSync (ID: %lu, TS: %lu, Interval: %lu) received.\r\n",
                time_sync_msg->TimesyncID, time_sync_msg->UtcTimestamp, time_sync_msg->WakeUpInterval);
 
-        u32LastProcessedTimeSyncID = time_sync_msg->TimesyncID;
+        u64LastProcessedTimeSyncUTC = time_sync_msg->UtcTimestamp;
         MESHNETWORK_vSetWakeupInterval((WakeupInterval)time_sync_msg->WakeUpInterval);
         MESHNETWORK_vProcessUTCTimestamp(time_sync_msg->UtcTimestamp);
 
@@ -863,6 +866,7 @@ void MESHNETWORK_vSendTimesyncMessage(uint32_t timesync_id, uint32_t utc_timesta
 
 	// Add this timesync ID to sender - This avoid the re-transmission of the timesync msg
 	u32LastProcessedTimeSyncID = timesync_id+1;
+	u64LastProcessedTimeSyncUTC = utc_timestamp+10;
 
     LoraRadio_Packet_t tx_packet;
 	if(!MESHNETWORK_bEncodeTimesyncMessage(&meshTimesyncPacket, tx_packet.buffer, sizeof(tx_packet.buffer), &tx_packet.length))

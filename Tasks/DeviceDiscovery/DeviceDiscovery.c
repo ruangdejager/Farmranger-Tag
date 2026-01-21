@@ -22,7 +22,7 @@
 #define APP_TASK_PRIORITY       	(configMAX_PRIORITIES - 3) // Lower priority for app logic
 #define APP_TASK_STACK_SIZE     	(configMINIMAL_STACK_SIZE * 10)
 
-#define LOST_PRIMARY_TIMEOUT_MIN    480      // ~24 hours
+#define LOST_PRIMARY_TIMEOUT_MIN    40      // ~24 hours
 
 // --- PRIVATE FREE_RTOS RESOURCES ---
 static EventGroupHandle_t xDiscoveryEventGroup;
@@ -254,7 +254,7 @@ void DEVICE_DISCOVERY_vCheckWakeupSchedule(void)
 {
 
 	// Check for wakeup condition
-	if(RTC_u64GetUTC() % (MESHNETWORK_u8GetWakeupInterval()*60) == 0 )
+	if(RTC_u64GetUTC() % (((uint64_t)MESHNETWORK_u8GetWakeupInterval())*60) == 0 )
 	{
 
 		SYSTEM_vDeactivateDeepSleep();
@@ -300,7 +300,7 @@ static void DEVICE_DISCOVERY_vRecoveryMode(void)
 
 //    LORARADIO_vSetRxContinuous();
 
-    for (uint8_t i = 0; i < WAKEUP_INTERVAL_MAX_COUNT*60; i++)
+    for (uint8_t i = 0; i < 120*60; i++)
     {
         vTaskDelay(pdMS_TO_TICKS(1000));  // 1 minute
 
@@ -315,7 +315,9 @@ static void DEVICE_DISCOVERY_vRecoveryMode(void)
     }
 
     DBG("RecoveryMode: No primary found.\r\n");
+#warning Should we reset last seen here?
     MESHNETWORK_vUpdatePrimaryLastSeen();
+
     // ---- B / common: Deep sleep after this cycle ----
 //    LORARADIO_vEnterDeepSleep();
 //    SYSTEM_vActivateDeepSleep();
