@@ -181,10 +181,8 @@ void LORARADIO_vTxTask(void *parameters)
 
 uint32_t LORARADIO_u32GetUniqueId (void)
 {
-	return ((uint32_t)u8DevEUI[1] << 24) |
-	           ((uint32_t)u8DevEUI[3] << 16)  |
-			   ((uint32_t)u8DevEUI[4] << 8)  |
-	           ((uint32_t)u8DevEUI[5]);
+	return (((uint32_t)u8DevEUI[1] << 24) |
+	           ((uint32_t)u8DevEUI[3] << 16)) >> 16 ;
 }
 
 /**
