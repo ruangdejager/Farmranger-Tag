@@ -53,7 +53,10 @@ typedef struct {
 typedef struct {
     uint32_t            u32DReqID;
     uint32_t            u32OGDreqSenderID;
-    uint32_t            u32PreferredParentID;
+
+    uint32_t u32ParentCandidates[MESH_MAX_PARENT_CANDIDATES];
+    uint8_t  u8ParentCandidateCount;
+
     uint8_t             u8MyHopCountToDReqSender;
     TickType_t          tDReqReceivedTime;
     LocalNeighborEntry_t tLocalDiscoveredDevices[MESH_MAX_LOCAL_DISCOVERED_DEVICES];
@@ -142,11 +145,13 @@ static TimerHandle_t xMeshReplySchedulerTimer;
 // --- PRIVATE FUNCTION PROTOTYPES ---
 static void MESHNETWORK_vAddOrUpdateGlobalNeighbor(uint32_t device_id, uint8_t hop_count, int16_t rssi, int8_t snr);
 static void MESHNETWORK_vAddOrUpdateLocalCache(uint32_t device_id, uint8_t hop_count, int16_t rssi, int8_t snr);
+static void MESHNETWORK_vAddParentCandidate(uint32_t senderID);
+static bool MESHNETWORK_bIsMyParent(uint32_t parent_id);
 static TickType_t MESHNETWORK_tCalculateReplyDelay(uint8_t my_hop_count_to_dreq_sender);
 static void MESHNETWORK_vHandleDReq(const MeshDReqPacket *dreq_packet);
 static void MESHNETWORK_vHandleDRep(const MeshDRepPacket *drep_packet);
 static void MESHNETWORK_vSendDReq(uint32_t dreq_id, uint32_t sender_id, uint8_t ttl);
-static void MESHNETWORK_vSendDRep(void);
+static void MESHNETWORK_vSendDRep(uint8_t parent_index);
 
 // --- PUBLIC FUNCTIONS ---
 
@@ -300,7 +305,7 @@ void MESHNETWORK_vReplySchedulerTask(void *pvParameters) {
             //  - we haven't exhausted our retry budget
             if (CurrentDiscoveryCache.u32DReqID != 0 && // Valid discovery round active
                 MESHNETWORK_u32GetUniqueId() != CurrentDiscoveryCache.u32OGDreqSenderID &&
-                CurrentDiscoveryCache.u32PreferredParentID != 0 &&
+				CurrentDiscoveryCache.u8ParentCandidateCount > 0 &&
                 CurrentDiscoveryCache.u8LocalDiscoveredDevicesCount > 0 &&
                 CurrentDiscoveryCache.u8DRepAttempts < MESH_DREP_RETRY_COUNT) {
 
@@ -310,8 +315,13 @@ void MESHNETWORK_vReplySchedulerTask(void *pvParameters) {
                 if (now >= CurrentDiscoveryCache.tScheduledReplyTime) {
 
                     // Send one DRep attempt
-                    MESHNETWORK_vSendDRep();
-                    CurrentDiscoveryCache.u8DRepAttempts++;
+                	uint8_t parent_index =
+                	    CurrentDiscoveryCache.u8DRepAttempts %
+                	    CurrentDiscoveryCache.u8ParentCandidateCount;
+
+                	MESHNETWORK_vSendDRep(parent_index);
+                	CurrentDiscoveryCache.u8DRepAttempts++;
+
 
                     // Schedule next retry if we still have attempts left
                     if (CurrentDiscoveryCache.u8DRepAttempts < MESH_DREP_RETRY_COUNT) {
@@ -452,7 +462,6 @@ bool MESHNETWORK_bStartDiscoveryRound(uint32_t dreq_id, uint32_t original_dreq_s
     CurrentDiscoveryCache.u8MyHopCountToDReqSender = 0; // 0 hops for the initiator
     CurrentDiscoveryCache.tDReqReceivedTime = xTaskGetTickCount(); // Use current time as reference
     CurrentDiscoveryCache.tScheduledReplyTime = 0; // Not applicable for initiator's own DRep sending logic immediately
-    CurrentDiscoveryCache.u32PreferredParentID = 0; // No parent for initiator
 
     // Add initiator's own info to its local cache (which is also its global table)
     MESHNETWORK_vAddOrUpdateLocalCache(MESHNETWORK_u32GetUniqueId(), 0, 0, 0); // RSSI/SNR 0 for self
@@ -547,6 +556,32 @@ static void MESHNETWORK_vAddOrUpdateLocalCache(uint32_t device_id, uint8_t hop_c
     }
 }
 
+static void MESHNETWORK_vAddParentCandidate(uint32_t senderID)
+{
+    // Avoid duplicates
+    for (uint8_t i = 0; i < CurrentDiscoveryCache.u8ParentCandidateCount; i++) {
+        if (CurrentDiscoveryCache.u32ParentCandidates[i] == senderID) {
+            return;
+        }
+    }
+
+    if (CurrentDiscoveryCache.u8ParentCandidateCount < MESH_MAX_PARENT_CANDIDATES) {
+        CurrentDiscoveryCache.u32ParentCandidates[
+            CurrentDiscoveryCache.u8ParentCandidateCount++
+        ] = senderID;
+    }
+}
+
+static bool MESHNETWORK_bIsMyParent(uint32_t parent_id)
+{
+    for (uint8_t i = 0; i < CurrentDiscoveryCache.u8ParentCandidateCount; i++) {
+        if (CurrentDiscoveryCache.u32ParentCandidates[i] == parent_id) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static TickType_t MESHNETWORK_tCalculateReplyDelay(uint8_t my_hop_count_to_dreq_sender)
 {
     // Clamp hop count to our configured TTL bound
@@ -594,7 +629,11 @@ static void MESHNETWORK_vHandleDReq(const MeshDReqPacket *dreq_packet) {
 		(dreq_packet->Header.dReqID == u32LastProcessedDReqID && received_hop_count < CurrentDiscoveryCache.u8MyHopCountToDReqSender)) {
 
 		if (dreq_packet->Header.dReqID > u32LastProcessedDReqID) {
+
 			memset(&CurrentDiscoveryCache, 0, sizeof(DiscoveryCache_t));
+
+			CurrentDiscoveryCache.u8ParentCandidateCount = 0;
+
 			CurrentDiscoveryCache.u32DReqID = dreq_packet->Header.dReqID;
 			CurrentDiscoveryCache.u32OGDreqSenderID = dreq_packet->OGDreqSenderID;
 			CurrentDiscoveryCache.tDReqReceivedTime = xTaskGetTickCount();
@@ -605,8 +644,10 @@ static void MESHNETWORK_vHandleDReq(const MeshDReqPacket *dreq_packet) {
 		}
 
 		if (CurrentDiscoveryCache.u8MyHopCountToDReqSender == 0 || received_hop_count < CurrentDiscoveryCache.u8MyHopCountToDReqSender) {
+
 			CurrentDiscoveryCache.u8MyHopCountToDReqSender = received_hop_count;
-			CurrentDiscoveryCache.u32PreferredParentID = dreq_packet->Header.senderID;
+			MESHNETWORK_vAddParentCandidate(dreq_packet->Header.senderID);
+
 			CurrentDiscoveryCache.tScheduledReplyTime = CurrentDiscoveryCache.tDReqReceivedTime +
 															  MESHNETWORK_tCalculateReplyDelay(CurrentDiscoveryCache.u8MyHopCountToDReqSender);
 
@@ -671,7 +712,7 @@ static void MESHNETWORK_vHandleDRep(const MeshDRepPacket *drep_packet) {
         		MESHNETWORK_u32GetUniqueId(), drep_packet->Header.senderID, drep_packet->NeighborList_count);
     }
     // If we are an intermediate relay node and this DRep is from a downstream child
-    else if (drep_packet->ParentID == MESHNETWORK_u32GetUniqueId()) {
+    else if (MESHNETWORK_bIsMyParent(drep_packet->ParentID)) {
         DBG("MeshNetwork: Received DRep from downstream %u, num_neighbors %u\r\n",
                drep_packet->Header.senderID, drep_packet->NeighborList_count);
         // Add all reported neighbors to our local cache for potential relaying
@@ -688,8 +729,9 @@ static void MESHNETWORK_vHandleDRep(const MeshDRepPacket *drep_packet) {
         xEventGroupSetBits(xMeshReplySchedulerEventGroup, MESH_REPLY_SCHEDULE_BIT);
     } else {
         // DRep not for us or irrelevant for current discovery round
-        DBG("MeshNetwork: Ignored DRep from %u (parent %u, current parent %u).\r\n",
-               drep_packet->Header.senderID, drep_packet->ParentID, CurrentDiscoveryCache.u32PreferredParentID);
+    	DBG("MeshNetwork: Ignored DRep from %u (parent %u not in my parent set).\r\n",
+    	       drep_packet->Header.senderID,
+    	       drep_packet->ParentID);
     }
 
 }
@@ -773,7 +815,7 @@ static void MESHNETWORK_vSendDReq(uint32_t dreq_id, uint32_t sender_id, uint8_t 
     }
 }
 
-static void MESHNETWORK_vSendDRep(void) {
+static void MESHNETWORK_vSendDRep(uint8_t parent_index) {
     // Dynamically allocate memory for the flexible array member
 	MeshDRepPacket * pMeshDRepPacket = (MeshDRepPacket*)pvPortMalloc(sizeof(MeshDRepPacket) + (MESH_MAX_NEIGHBORS_PER_PACKET * sizeof(MeshNeighborInfo)));
     if (pMeshDRepPacket == NULL) {
@@ -786,7 +828,14 @@ static void MESHNETWORK_vSendDRep(void) {
     pMeshDRepPacket->Header.senderID = MESHNETWORK_u32GetUniqueId();
     pMeshDRepPacket->Header.dReqID = CurrentDiscoveryCache.u32DReqID;
     pMeshDRepPacket->OGDreqSenderID = CurrentDiscoveryCache.u32OGDreqSenderID; // Added this field
-    pMeshDRepPacket->ParentID = CurrentDiscoveryCache.u32PreferredParentID;
+
+    if (parent_index >= CurrentDiscoveryCache.u8ParentCandidateCount) {
+        vPortFree(pMeshDRepPacket);
+        return;
+    }
+
+    pMeshDRepPacket->ParentID =
+        CurrentDiscoveryCache.u32ParentCandidates[parent_index];
 
     uint8_t neighbors_added = 0;
     uint32_t my_id = MESHNETWORK_u32GetUniqueId();
@@ -846,8 +895,9 @@ static void MESHNETWORK_vSendDRep(void) {
         }
 
         if (MESHNETWORK_bSendMessage(&tx_packet)) {
-            DBG("MeshNetwork: Sending DRep to parent %u with %u neighbors. Current time: %lu.\r\n",
-                   pMeshDRepPacket->ParentID, pMeshDRepPacket->NeighborList_count, xTaskGetTickCount());
+        	DBG("MeshNetwork: Sending DRep to parent[%u]=%u ...",
+        	    parent_index,
+        	    pMeshDRepPacket->ParentID);
             DBG("Next scheduled reply (if any): %lu\r\n", CurrentDiscoveryCache.tScheduledReplyTime);
         } else {
             DBG("MeshNetwork: Failed to queue DRep to parent %u for TX.\r\n", pMeshDRepPacket->ParentID);
