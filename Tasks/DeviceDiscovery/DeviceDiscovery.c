@@ -59,8 +59,6 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 {
 	(void)pvParameters;
 
-	uint32_t base_dreq_id = 0;
-
 	// Configuration — how many discovery rounds per wakeup?
 	const uint8_t DISCOVERY_ROUNDS = 3;   // <---- Tune this based on reliability needs
 
@@ -96,7 +94,7 @@ while (1)
 			pdFALSE,
 			portMAX_DELAY);
 
-		DBG("DeviceDiscovery %u: Woke up for discovery.\r\n",
+		DBG("DeviceDiscovery %X: Woke up for discovery.\r\n",
 			LORARADIO_u32GetUniqueId());
 
 		vTaskDelay(pdMS_TO_TICKS(APP_WAKEUP_BUFFER_MS));
@@ -106,13 +104,10 @@ while (1)
 		// ---------------------------------------------------------------------
 		if (tDeviceRole == DEVICE_PRIMARY)
 		{
-			DBG("DeviceDiscovery %u: Clearing neighbor table for new campaign.\r\n",
+			DBG("DeviceDiscovery %X: Clearing neighbor table for new campaign.\r\n",
 				LORARADIO_u32GetUniqueId());
 			MESHNETWORK_vClearDiscoveredNeighbors();
 		}
-
-		// Generate a base DReqID so each round gets unique IDs
-		base_dreq_id = xTaskGetTickCount();
 
 		// ---------------------------------------------------------------------
 		// 3. Run MULTIPLE DISCOVERY ROUNDS (Primary only initiates)
@@ -121,12 +116,14 @@ while (1)
 		{
 			if (tDeviceRole == DEVICE_PRIMARY)
 			{
-				uint32_t dreq_id = base_dreq_id + round;
 
-				DBG("DeviceDiscovery %u: Starting Discovery Round %u (DReqID=%lu)\r\n",
+				// Generate a base DReqID so each round gets unique IDs
+				uint32_t dreq_id = MESHNETWORK_u32GenerateGlobalMsgID();
+
+				DBG("DeviceDiscovery %X: Starting Discovery Round %X (DReqID=%X)\r\n",
 					LORARADIO_u32GetUniqueId(),
 					round,
-					(unsigned long)dreq_id);
+					dreq_id);
 
 				MESHNETWORK_bStartDiscoveryRound(
 					dreq_id,
@@ -134,7 +131,7 @@ while (1)
 			}
 			else
 			{
-				DBG("DeviceDiscovery %u: Secondary waiting for DReq flood in Round %u\r\n",
+				DBG("DeviceDiscovery %X: Secondary waiting for DReq flood in Round %X\r\n",
 					LORARADIO_u32GetUniqueId(), round);
 			}
 
@@ -145,7 +142,7 @@ while (1)
 		// ---------------------------------------------------------------------
 		// 4. ALL ROUNDS DONE — Primary Processes the UNION of all neighbors
 		// ---------------------------------------------------------------------
-		DBG("DeviceDiscovery %u: Multi-round discovery campaign complete.\r\n",
+		DBG("DeviceDiscovery %X: Multi-round discovery campaign complete.\r\n",
 			LORARADIO_u32GetUniqueId());
 
 		if (tDeviceRole == DEVICE_PRIMARY)
@@ -157,12 +154,12 @@ while (1)
 													250,
 													&actual_count))
 			{
-				DBG("DeviceDiscovery %u: Final UNION Result: %u neighbors discovered.\r\n",
+				DBG("DeviceDiscovery %X: Final UNION Result: %X neighbors discovered.\r\n",
 					LORARADIO_u32GetUniqueId(), actual_count);
 
 				for (uint16_t i = 0; i < actual_count; i++)
 				{
-					DBG("  ID:%u  Hops:%u  RSSI:%d  SNR:%d  LastSeen:%lu\r\n",
+					DBG("  ID:%X  Hops:%X  RSSI:%d  SNR:%d  LastSeen:%lu\r\n",
 						discovered_neighbors_buffer[i].device_id,
 						discovered_neighbors_buffer[i].hop_count,
 						discovered_neighbors_buffer[i].rssi,
@@ -172,7 +169,7 @@ while (1)
 			}
 			else
 			{
-				DBG("DeviceDiscovery %u: Error retrieving final neighbor table.\r\n",
+				DBG("DeviceDiscovery %X: Error retrieving final neighbor table.\r\n",
 					LORARADIO_u32GetUniqueId());
 			}
 
@@ -185,18 +182,18 @@ while (1)
 				BSP_LED_On(LED_GREEN);
 			}
 
-			DBG("DeviceDiscovery %u: Logger connected.\r\n",
+			DBG("DeviceDiscovery %X: Logger connected.\r\n",
 				LORARADIO_u32GetUniqueId());
 
 			if (DEVICE_DISCOVERY_bSendDiscoveryData(discovered_neighbors_buffer,
 													actual_count))
 			{
-				DBG("DeviceDiscovery %u: Log SUCCESS.\r\n",
+				DBG("DeviceDiscovery %X: Log SUCCESS.\r\n",
 					LORARADIO_u32GetUniqueId());
 			}
 			else
 			{
-				DBG("DeviceDiscovery %u: Log FAILED.\r\n",
+				DBG("DeviceDiscovery %X: Log FAILED.\r\n",
 					LORARADIO_u32GetUniqueId());
 			}
 
@@ -235,7 +232,7 @@ while (1)
 		if (tDeviceRole == DEVICE_SECONDARY &&
 		    (now - last_heard) > LOST_PRIMARY_TIMEOUT_MIN*60)
 		{
-		    DBG("Node %u: ENTERING RECOVERY MODE.\r\n", LORARADIO_u32GetUniqueId());
+		    DBG("Node %X: ENTERING RECOVERY MODE.\r\n", LORARADIO_u32GetUniqueId());
 		    DEVICE_DISCOVERY_vRecoveryMode();
 		}
 		// ---- B: Deep sleep normally ----
@@ -281,7 +278,7 @@ void DEVICE_DISCOVERY_vCheckWakeupSchedule(void)
 void DEVICE_DISCOVERY_vSendTS(void)
 {
     DBG("\r\n--- START TIMESYNC ---\r\n");
-    uint32_t current_ts_id = xTaskGetTickCount();
+    uint32_t current_ts_id = MESHNETWORK_u32GenerateGlobalMsgID();
     MESHNETWORK_vSendTimesyncMessage(current_ts_id, RTC_u64GetUTC(), MESHNETWORK_tGetCurrentWakeupIntervalEnum());
 }
 
@@ -295,7 +292,7 @@ DiscoveryDeviceRole DEVICE_DISCOVERY_tGetDeviceRole(void)
 // ======================================================================
 static void DEVICE_DISCOVERY_vRecoveryMode(void)
 {
-    DBG("RecoveryMode: Node %u LISTENING for primary.\r\n",
+    DBG("RecoveryMode: Node %X LISTENING for primary.\r\n",
         LORARADIO_u32GetUniqueId());
 
 //    LORARADIO_vSetRxContinuous();
