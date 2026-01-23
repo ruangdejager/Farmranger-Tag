@@ -30,13 +30,12 @@
 
 MeshNeighborInfo.hopCount						int_size:IS_8
 MeshNeighborInfo.rssi							int_size:IS_16
-MeshNeighborInfo.snr							int_size:IS_8
+MeshNeighborInfo.batVoltage						int_size:IS_16
 
 MeshDReqPacket.Ttl							    int_size:IS_8
 MeshDReqPacket.Rssi							    int_size:IS_16
-MeshDReqPacket.Snr							    int_size:IS_8
 
-MeshDRepPacket.NeighborList						max_count:16
+MeshDRepPacket.NeighborList						max_count:6
 
 TimeSyncMessage.WakeUpInterval                  int_size:IS_8
 

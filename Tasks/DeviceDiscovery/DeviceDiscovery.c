@@ -154,16 +154,16 @@ while (1)
 													250,
 													&actual_count))
 			{
-				DBG("DeviceDiscovery %X: Final UNION Result: %X neighbors discovered.\r\n",
+				DBG("DeviceDiscovery %X: Final UNION Result: %u neighbors discovered.\r\n",
 					LORARADIO_u32GetUniqueId(), actual_count);
 
 				for (uint16_t i = 0; i < actual_count; i++)
 				{
-					DBG("  ID:%X  Hops:%X  RSSI:%d  SNR:%d  LastSeen:%lu\r\n",
+					DBG("  ID:%X  Hops:%X  RSSI:%d  Bat:%d  LastSeen:%lu\r\n",
 						discovered_neighbors_buffer[i].device_id,
 						discovered_neighbors_buffer[i].hop_count,
 						discovered_neighbors_buffer[i].rssi,
-						discovered_neighbors_buffer[i].snr,
+						discovered_neighbors_buffer[i].batLevel,
 						discovered_neighbors_buffer[i].last_seen);
 				}
 			}
@@ -196,6 +196,8 @@ while (1)
 				DBG("DeviceDiscovery %X: Log FAILED.\r\n",
 					LORARADIO_u32GetUniqueId());
 			}
+
+//			vTaskDelay(pdMS_TO_TICKS(1000));
 
 			// Timestamp sync
 			uint64_t now = DEVICE_DISCOVERY_DRIVER_u64RequestTS();

@@ -14,7 +14,7 @@ message MeshNeighborInfo {
     uint32 deviceID = 1;
     uint32 hopCount = 2;
     int32 rssi = 3;
-    int32 snr = 4;
+    uint32 batVoltage = 4;
 
 }
 
@@ -24,7 +24,6 @@ message MeshDReqPacket {
     uint32 OGDreqSenderID = 2;
     uint32 Ttl = 3;
     int32 Rssi = 4;
-    int32 Snr = 5;
 
 }
 

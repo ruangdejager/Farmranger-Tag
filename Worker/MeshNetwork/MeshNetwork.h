@@ -58,7 +58,7 @@ typedef struct {
     uint32_t    device_id;
     uint8_t     hop_count;
     int16_t     rssi;
-    int8_t      snr;
+    uint16_t    batLevel;
     TickType_t  last_seen;
 } MeshDiscoveredNeighbor_t;
 

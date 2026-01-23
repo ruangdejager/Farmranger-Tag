@@ -351,10 +351,11 @@ bool FARMRANGER_bLogData(MeshDiscoveredNeighbor_t *neighbors, uint16_t count)
 
         int n = snprintf(&logBuffer[pos],
                          sizeof(logBuffer) - pos,
-                         last ? "%X,%u,%d\r\n" : "%X,%u,%d\t",
+                         last ? "%X,%u,%d,%d\r\n" : "%X,%u,%d,%d\t",
                          neighbors[i].device_id,
                          neighbors[i].hop_count,
-                         neighbors[i].rssi);
+                         neighbors[i].rssi,
+						 neighbors[i].batLevel);
 
         if (n <= 0 || n >= (int)(sizeof(logBuffer) - pos))
             return false;

@@ -22,6 +22,7 @@
 #include "dbg_log.h"
 #include "DeviceDiscovery.h"
 #include "hal_rtc.h"
+#include "Battery.h"
 
 // --- PRIVATE DEFINES ---
 #define MESH_RX_PARSER_TASK_PRIORITY    (configMAX_PRIORITIES - 2)
@@ -78,7 +79,7 @@ typedef struct {
     uint32_t    u32DeviceID;
     uint8_t     u8HopCount; // Hops from Original_DReq_Sender_ID to this device
     int16_t     i16Rssi;      // RSSI of the DReq packet received by this device
-    int8_t      u8Snr;       // SNR of the DReq packet received by this device
+    uint16_t	u16BatLevel;
     TickType_t  tLastUpdated; // For aging out entries
     bool        bReportedUpstream; // Flag to track if this device's info has been sent upstream
 } LocalNeighborEntry_t;
@@ -145,7 +146,7 @@ WakeupInterval MESHNETWORK_tGetCurrentWakeupIntervalEnum(void) {
 void MESHNETWORK_vSetWakeupInterval(WakeupInterval new_interval) {
     if (new_interval < WAKEUP_INTERVAL_MAX_COUNT) {
         tCurrentWakeupInterval = new_interval;
-        DBG("MeshNetwork: Wakeup interval set to %X minutes (enum %X).\r\n",
+        DBG("MeshNetwork: Wakeup interval set to %d minutes (enum %d).\r\n",
                MESHNETWORK_u8GetWakeupInterval(), tCurrentWakeupInterval);
     } else {
         DBG("MeshNetwork: Attempted to set invalid wakeup interval enum: %X.\r\n", (unsigned int)new_interval);
@@ -179,8 +180,8 @@ static TimerHandle_t xMeshReplySchedulerTimer;
 #define MESH_REPLY_TIMER_BIT (1UL << 1UL) // New event bit for timer expiration
 
 // --- PRIVATE FUNCTION PROTOTYPES ---
-static void MESHNETWORK_vAddOrUpdateGlobalNeighbor(uint32_t device_id, uint8_t hop_count, int16_t rssi, int8_t snr);
-static void MESHNETWORK_vAddOrUpdateLocalCache(uint32_t device_id, uint8_t hop_count, int16_t rssi, int8_t snr);
+static void MESHNETWORK_vAddOrUpdateGlobalNeighbor(uint32_t device_id, uint8_t hop_count, int16_t rssi, uint16_t batLevel);
+static void MESHNETWORK_vAddOrUpdateLocalCache(uint32_t device_id, uint8_t hop_count, int16_t rssi, uint16_t batLevel);
 static void MESHNETWORK_vAddParentCandidate(uint32_t senderID);
 static bool MESHNETWORK_bIsMyParent(uint32_t parent_id);
 static TickType_t MESHNETWORK_tCalculateReplyDelay(uint8_t my_hop_count_to_dreq_sender);
@@ -437,7 +438,6 @@ void MESHNETWORK_vParserTask(void *pvParameters) {
 					DBG("--- PROTOBUF: PROBLEM DECODING DREQ ---\r\n");
 				}
 				tMeshDReqPacket.Rssi = rx_packet.rssi;
-				tMeshDReqPacket.Snr = rx_packet.snr;
 
 	            // Check if this DReq was originally sent by THIS device.
 	            // If the Original DReq Sender ID in the packet matches this device's unique ID,
@@ -510,7 +510,7 @@ bool MESHNETWORK_bStartDiscoveryRound(uint32_t dreq_id, uint32_t original_dreq_s
     CurrentDiscoveryCache.tScheduledReplyTime = 0; // Not applicable for initiator's own DRep sending logic immediately
 
     // Add initiator's own info to its local cache (which is also its global table)
-    MESHNETWORK_vAddOrUpdateLocalCache(MESHNETWORK_u32GetUniqueId(), 0, 0, 0); // RSSI/SNR 0 for self
+    MESHNETWORK_vAddOrUpdateLocalCache(MESHNETWORK_u32GetUniqueId(), 0, 0, BAT_u16GetVoltage()); // RSSI for self
 
     DBG("MeshNetwork: Initiating DReq with ID %X from %X\r\n", dreq_id, original_dreq_sender_id);
     bool queued = xQueueSend(xMeshNetworkInitDReqQueue, &event, portMAX_DELAY) == pdPASS;
@@ -546,7 +546,7 @@ void MESHNETWORK_vClearDiscoveredNeighbors(void) {
 
 // --- PRIVATE HELPER FUNCTIONS ---
 
-static void MESHNETWORK_vAddOrUpdateGlobalNeighbor(uint32_t device_id, uint8_t hop_count, int16_t rssi, int8_t snr) {
+static void MESHNETWORK_vAddOrUpdateGlobalNeighbor(uint32_t device_id, uint8_t hop_count, int16_t rssi, uint16_t batLevel) {
     if (xSemaphoreTake(xMeshNeighborTableMutex, portMAX_DELAY) == pdTRUE) {
         bool found = false;
         for (uint16_t i = 0; i < u8MeshDiscoveredNeighborsCount; i++) {
@@ -556,7 +556,7 @@ static void MESHNETWORK_vAddOrUpdateGlobalNeighbor(uint32_t device_id, uint8_t h
                     (hop_count == tMeshDiscoveredNeighbors[i].hop_count && rssi > tMeshDiscoveredNeighbors[i].rssi)) {
                 	tMeshDiscoveredNeighbors[i].hop_count = hop_count;
                 	tMeshDiscoveredNeighbors[i].rssi = rssi;
-                	tMeshDiscoveredNeighbors[i].snr = snr;
+                	tMeshDiscoveredNeighbors[i].batLevel = batLevel;
                 }
                 tMeshDiscoveredNeighbors[i].last_seen = xTaskGetTickCount();
                 found = true;
@@ -567,7 +567,7 @@ static void MESHNETWORK_vAddOrUpdateGlobalNeighbor(uint32_t device_id, uint8_t h
         	tMeshDiscoveredNeighbors[u8MeshDiscoveredNeighborsCount].device_id = device_id;
         	tMeshDiscoveredNeighbors[u8MeshDiscoveredNeighborsCount].hop_count = hop_count;
         	tMeshDiscoveredNeighbors[u8MeshDiscoveredNeighborsCount].rssi = rssi;
-        	tMeshDiscoveredNeighbors[u8MeshDiscoveredNeighborsCount].snr = snr;
+        	tMeshDiscoveredNeighbors[u8MeshDiscoveredNeighborsCount].batLevel = batLevel;
         	tMeshDiscoveredNeighbors[u8MeshDiscoveredNeighborsCount].last_seen = xTaskGetTickCount();
         	u8MeshDiscoveredNeighborsCount++;
         }
@@ -575,7 +575,7 @@ static void MESHNETWORK_vAddOrUpdateGlobalNeighbor(uint32_t device_id, uint8_t h
     }
 }
 
-static void MESHNETWORK_vAddOrUpdateLocalCache(uint32_t device_id, uint8_t hop_count, int16_t rssi, int8_t snr) {
+static void MESHNETWORK_vAddOrUpdateLocalCache(uint32_t device_id, uint8_t hop_count, int16_t rssi, uint16_t batLevel) {
     bool found = false;
     for (uint8_t i = 0; i < CurrentDiscoveryCache.u8LocalDiscoveredDevicesCount; i++) {
         if (CurrentDiscoveryCache.tLocalDiscoveredDevices[i].u32DeviceID == device_id) {
@@ -583,7 +583,7 @@ static void MESHNETWORK_vAddOrUpdateLocalCache(uint32_t device_id, uint8_t hop_c
                 (hop_count == CurrentDiscoveryCache.tLocalDiscoveredDevices[i].u8HopCount && rssi > CurrentDiscoveryCache.tLocalDiscoveredDevices[i].i16Rssi)) {
             	CurrentDiscoveryCache.tLocalDiscoveredDevices[i].u8HopCount = hop_count;
             	CurrentDiscoveryCache.tLocalDiscoveredDevices[i].i16Rssi = rssi;
-                CurrentDiscoveryCache.tLocalDiscoveredDevices[i].u8Snr = snr;
+            	CurrentDiscoveryCache.tLocalDiscoveredDevices[i].u16BatLevel = batLevel;
             }
             CurrentDiscoveryCache.tLocalDiscoveredDevices[i].tLastUpdated = xTaskGetTickCount();
             CurrentDiscoveryCache.tLocalDiscoveredDevices[i].bReportedUpstream = false; // Mark as not yet reported
@@ -595,7 +595,7 @@ static void MESHNETWORK_vAddOrUpdateLocalCache(uint32_t device_id, uint8_t hop_c
         CurrentDiscoveryCache.tLocalDiscoveredDevices[CurrentDiscoveryCache.u8LocalDiscoveredDevicesCount].u32DeviceID = device_id;
         CurrentDiscoveryCache.tLocalDiscoveredDevices[CurrentDiscoveryCache.u8LocalDiscoveredDevicesCount].u8HopCount = hop_count;
         CurrentDiscoveryCache.tLocalDiscoveredDevices[CurrentDiscoveryCache.u8LocalDiscoveredDevicesCount].i16Rssi = rssi;
-        CurrentDiscoveryCache.tLocalDiscoveredDevices[CurrentDiscoveryCache.u8LocalDiscoveredDevicesCount].u8Snr = snr;
+        CurrentDiscoveryCache.tLocalDiscoveredDevices[CurrentDiscoveryCache.u8LocalDiscoveredDevicesCount].u16BatLevel = batLevel;
         CurrentDiscoveryCache.tLocalDiscoveredDevices[CurrentDiscoveryCache.u8LocalDiscoveredDevicesCount].tLastUpdated = xTaskGetTickCount();
         CurrentDiscoveryCache.tLocalDiscoveredDevices[CurrentDiscoveryCache.u8LocalDiscoveredDevicesCount].bReportedUpstream = false;
         CurrentDiscoveryCache.u8LocalDiscoveredDevicesCount++;
@@ -724,8 +724,7 @@ static void MESHNETWORK_vHandleDReq(const MeshDReqPacket *dreq_packet) {
 	        MESHNETWORK_u32GetUniqueId(),
 	        CurrentDiscoveryCache.u8MyHopCountToDReqSender,
 	        dreq_packet->Rssi,
-	        dreq_packet->Snr
-	    );
+			BAT_u16GetVoltage());
 	}
 	else
 	{
@@ -755,7 +754,7 @@ static void MESHNETWORK_vHandleDRep(const MeshDRepPacket *drep_packet) {
             MESHNETWORK_vAddOrUpdateGlobalNeighbor(drep_packet->NeighborList[i].deviceID,
                                                       drep_packet->NeighborList[i].hopCount,
                                                       drep_packet->NeighborList[i].rssi,
-                                                      drep_packet->NeighborList[i].snr);
+													  drep_packet->NeighborList[i].batVoltage);
         }
         DBG("MeshNetwork: Primary Device %X: Received DRep from %X, added %X neighbors.\r\n",
         		MESHNETWORK_u32GetUniqueId(), drep_packet->Header.senderID, drep_packet->NeighborList_count);
@@ -772,7 +771,7 @@ static void MESHNETWORK_vHandleDRep(const MeshDRepPacket *drep_packet) {
             MESHNETWORK_vAddOrUpdateLocalCache(drep_packet->NeighborList[i].deviceID,
                                                   drep_packet->NeighborList[i].hopCount,
                                                   drep_packet->NeighborList[i].rssi,
-                                                  drep_packet->NeighborList[i].snr);
+												  drep_packet->NeighborList[i].batVoltage);
         }
         // NEW: Signal the reply scheduler to potentially send an updated DRep upstream
         xEventGroupSetBits(xMeshReplySchedulerEventGroup, MESH_REPLY_SCHEDULE_BIT);
@@ -853,7 +852,6 @@ static void MESHNETWORK_vSendDReq(uint32_t dreq_id, uint32_t sender_id, uint8_t 
 
 	meshDReqPacket.Ttl = ttl;
 	meshDReqPacket.Rssi = 0;
-	meshDReqPacket.Snr = 0;
 
     LoraRadio_Packet_t tx_packet;
 	if(!MESHNETWORK_bEncodeDReqMessage(&meshDReqPacket, tx_packet.buffer, sizeof(tx_packet.buffer), &tx_packet.length))
@@ -898,10 +896,16 @@ static void MESHNETWORK_vSendDRep(uint8_t parent_index) {
                         neighbors_added < MESH_MAX_NEIGHBORS_PER_PACKET; i++) {
         LocalNeighborEntry_t *entry = &CurrentDiscoveryCache.tLocalDiscoveredDevices[i];
         if (entry->u32DeviceID == my_id) {
-            memcpy(&pMeshDRepPacket->NeighborList[neighbors_added],
-                   entry,
-                   sizeof(MeshNeighborInfo));
-            neighbors_added++;
+
+        	MeshNeighborInfo *out = &pMeshDRepPacket->NeighborList[neighbors_added];
+
+        	out->deviceID   = entry->u32DeviceID;
+        	out->hopCount   = entry->u8HopCount;
+        	out->rssi       = entry->i16Rssi;
+        	out->batVoltage = entry->u16BatLevel;
+
+        	neighbors_added++;
+
             break;
         }
     }
@@ -922,10 +926,15 @@ static void MESHNETWORK_vSendDRep(uint8_t parent_index) {
                 continue;
             }
 
-            memcpy(&pMeshDRepPacket->NeighborList[neighbors_added],
-                   entry,
-                   sizeof(MeshNeighborInfo));
+            MeshNeighborInfo *out = &pMeshDRepPacket->NeighborList[neighbors_added];
+
+            out->deviceID   = entry->u32DeviceID;
+            out->hopCount   = entry->u8HopCount;
+            out->rssi       = entry->i16Rssi;
+            out->batVoltage = entry->u16BatLevel;
+
             neighbors_added++;
+
         }
 
         // Advance the round-robin index for the next send attempt
