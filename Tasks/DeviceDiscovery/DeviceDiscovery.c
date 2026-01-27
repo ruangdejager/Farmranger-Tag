@@ -195,6 +195,7 @@ while (1)
 			{
 				DBG("DeviceDiscovery %X: Log FAILED.\r\n",
 					LORARADIO_u32GetUniqueId());
+				vTaskDelay(pdMS_TO_TICKS(5000));
 			}
 
 //			vTaskDelay(pdMS_TO_TICKS(1000));
