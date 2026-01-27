@@ -37,7 +37,10 @@ static char acFrRxBuf[FR_RX_BUF_LEN];
 static uint8_t u8FrRxBufIdx = 0;
 
 static SemaphoreHandle_t xLineReadySem;
+static char acFrLineBuf[FR_RX_BUF_LEN];
 static QueueHandle_t xATQueue;
+
+static SemaphoreHandle_t xUartTxDoneSem;
 
 bool bFRDeviceOn;
 
@@ -69,6 +72,7 @@ void FARMRANGER_vATHandlerTask(void *args);
 BaseType_t FARMRANGER_tParseTimestamp(const char *line, void *ctx);
 BaseType_t FARMRANGER_tParseLoggerReady(const char *line, void *ctx);
 BaseType_t FARMRANGER_tParseOK(const char *line, void *ctx);
+BaseType_t FARMRANGER_tParseRDY(const char *line, void *ctx);
 
 void FARMRANGER_vInit(void)
 {
@@ -80,6 +84,9 @@ void FARMRANGER_vInit(void)
 	// UART interface will be enabled/disabled at Farmranger device activation
 
 	xLineReadySem = xSemaphoreCreateBinary();
+
+	xUartTxDoneSem = xSemaphoreCreateBinary();
+	configASSERT(xUartTxDoneSem != NULL);
 
 	xATQueue = xQueueCreate(4, sizeof(ATReq_t));
 	configASSERT(xATQueue != NULL);
@@ -127,13 +134,17 @@ void FARMRANGER_vRxTask(void *parameters)
             if (u8FrRxBufIdx < FR_RX_BUF_LEN - 1)
             {
                 acFrRxBuf[u8FrRxBufIdx++] = byte;
-                acFrRxBuf[u8FrRxBufIdx] = '\0';
             }
 
             // For the ATcmd handler it notifies the end of a command
             if (byte == '\n')
             {
-                xSemaphoreGive(xLineReadySem);
+            	/* Transfer ownership of the completed line */
+            	memcpy(acFrLineBuf, acFrRxBuf, u8FrRxBufIdx);
+            	acFrLineBuf[u8FrRxBufIdx] = '\0';
+            	u8FrRxBufIdx = 0;
+            	memset(acFrRxBuf, 0, FR_RX_BUF_LEN);
+            	xSemaphoreGive(xLineReadySem);
             }
         }
     }
@@ -151,47 +162,47 @@ void FARMRANGER_vNotifyOnRX(void)
 
 bool FARMRANGER_bDeviceOn(void)
 {
-	// Enable RX Task
-	vTaskResume(Farmranger_vRxTask_handle);
+    /* Ensure RX task is running */
+    vTaskResume(Farmranger_vRxTask_handle);
 
-	uint16_t timerCnt = 0;
+    if (bFRDeviceOn)
+        return true;
 
-	if (!bFRDeviceOn)
-	{
-		u8FrRxBufIdx = 0;
-		// Enable the uart peripheral
-		FR_DRIVER_vEnableUart(&farmranger.UartHandle);
-		// Drive the interrupt gpio high to activate farmranger
-		FR_DRIVER_vIntEnable();
+    /* Clear any stale notifications */
+    (void) ulTaskNotifyTake(pdTRUE, 0);
 
-		// Wait for "RDY" on the uart
-		DBG("Wait for RDY...\r\n");
-		do
-		{
-			// Start a timer to exit if Ready not found
-			//
-			//
-			// Yield task while waiting
+    taskENTER_CRITICAL();
+    memset(acFrRxBuf, 0, FR_RX_BUF_LEN);
+    memset(acFrLineBuf, 0, FR_RX_BUF_LEN);
+    u8FrRxBufIdx = 0;
+    xSemaphoreTake(xLineReadySem, 0); // drain
+    taskEXIT_CRITICAL();
 
-			vTaskDelay(pdMS_TO_TICKS(1));
-			timerCnt++;
+    /* Power up device first */
+    FR_DRIVER_vEnableUart(&farmranger.UartHandle);
+    FR_DRIVER_vIntEnable();
 
+    char respBuf[32] = {0};
+    memset(respBuf, 0, sizeof(respBuf));
 
-		} while ( (NULL == memmem(acFrRxBuf, u8FrRxBufIdx, "RDY\r\n", strlen("RDY\r\n")) ) && (timerCnt < 5000) );
+    /* Now wait for RDY via AT handler */
+    DBG("Wait for RDY...\r\n");
+    if (FARMRANGER_tATSend(NULL,
+                           FARMRANGER_tParseRDY,
+                           respBuf,
+                           sizeof(respBuf),
+                           respBuf,
+                           pdMS_TO_TICKS(5000)) != pdPASS)
+    {
+        DBG("RDY not received\r\n");
+        return false;
+    }
 
-		bFRDeviceOn = true;
-	}
-
-	DBG("Farmranger Ready.\r\n");
-
-	if (timerCnt < 5000)
-	{
-		return true;
-	}
-
-	return false;
-
+    bFRDeviceOn = true;
+    DBG("Farmranger Ready.\r\n");
+    return true;
 }
+
 
 void FARMRANGER_vDeviceOff(void)
 {
@@ -218,19 +229,23 @@ BaseType_t FARMRANGER_tATSend(const char *cmd,
     ATReq_t req = {
         .cmd = cmd,
         .parser = parser,
-        .context = out,
+        .context = context,
         .out = out,
         .outLen = outLen,
         .caller = xTaskGetCurrentTaskHandle(),
         .timeout = timeout
     };
 
+    (void) ulTaskNotifyTake(pdTRUE, 0);
+
     configASSERT(xATQueue != NULL);
     if (xQueueSend(xATQueue, &req, pdMS_TO_TICKS(100)) != pdPASS)
         return pdFAIL;
 
-    uint32_t res = ulTaskNotifyTake(pdTRUE, timeout);
-    return (res > 0) ? pdPASS : pdFAIL;
+    uint32_t notifyValue = 0;
+    if (xTaskNotifyWait(0, 0xFFFFFFFF, &notifyValue, timeout) != pdTRUE) return pdFAIL;
+
+    return (notifyValue == 1) ? pdPASS : pdFAIL;
 }
 
 void FARMRANGER_vATHandlerTask(void *args)
@@ -257,26 +272,25 @@ void FARMRANGER_vATHandlerTask(void *args)
                 if (xSemaphoreTake(xLineReadySem, pdMS_TO_TICKS(50)) == pdTRUE)
                 {
                     // Check line using parser
-                    if (req.parser(acFrRxBuf, req.context))
+                	if (req.parser(acFrLineBuf, req.context))
                     {
-                        xTaskNotifyGive(req.caller);
+                		xTaskNotify(req.caller,
+                		            1,   // SUCCESS
+                		            eSetValueWithOverwrite);
                         notified = pdTRUE;
-
-                        // FULL BUFFER CLEAR
-                        memset(acFrRxBuf, 0, FR_RX_BUF_LEN);
-                        u8FrRxBufIdx = 0;
                         break;
                     }
 
-                    // FULL BUFFER CLEAR for non-matching line
-                    memset(acFrRxBuf, 0, FR_RX_BUF_LEN);
-                    u8FrRxBufIdx = 0;
+                    /* Clear line so we don’t re-parse junk */
+                    memset(acFrLineBuf, 0, FR_RX_BUF_LEN);
                 }
             }
 
             // Timeout → notify caller, then clear buffer
             if (!notified)
-                xTaskNotifyGive(req.caller);
+        		xTaskNotify(req.caller,
+        		            2,   // TIMEOUT
+        		            eSetValueWithOverwrite);
 
             memset(acFrRxBuf, 0, FR_RX_BUF_LEN);
             u8FrRxBufIdx = 0;
@@ -325,7 +339,7 @@ uint64_t FARMRANGER_u64RequestTimestamp(void)
     			FARMRANGER_tParseTimestamp,
                 tsStr,
                 sizeof(tsStr),
-                NULL,
+				tsStr,
                 pdMS_TO_TICKS(2000)) == pdPASS)
     {
         // Convert ASCII timestamp (e.g., "1701122334") to uint64_t
@@ -338,8 +352,6 @@ uint64_t FARMRANGER_u64RequestTimestamp(void)
 
 bool FARMRANGER_bLogData(MeshDiscoveredNeighbor_t *neighbors, uint16_t count)
 {
-    if (count == 0 || neighbors == NULL)
-        return false;
 
     // 1. Build CSV-style payload
     static char logBuffer[4096];   // fits ~ 250 entries easily
@@ -378,14 +390,22 @@ bool FARMRANGER_bLogData(MeshDiscoveredNeighbor_t *neighbors, uint16_t count)
         return false;
     }
 
-    // 3. Send the actual payload (CSV buffer)
-    HAL_UART_u8TxPutBuffer(&farmranger.UartHandle,
-                           (uint8_t*)logBuffer,
-						   pos);
+    if (pos > 0)
+    {
+        // 3. Send the actual payload (CSV buffer)
+        HAL_UART_u8TxPutBuffer(&farmranger.UartHandle,
+                               (uint8_t*)logBuffer,
+    						   pos);
+        /* Wait until TX fully drained */
+        if (xSemaphoreTake(xUartTxDoneSem, pdMS_TO_TICKS(2000)) != pdTRUE)
+        {
+            DBG("UART TX timeout\r\n");
+            return false;
+        }
+    }
 
     // 4. Now wait for final OK
     memset(respBuf, 0, sizeof(respBuf));
-
     if (FARMRANGER_tATSend(NULL,
                            FARMRANGER_tParseOK,
                            respBuf,
@@ -403,7 +423,7 @@ bool FARMRANGER_bLogData(MeshDiscoveredNeighbor_t *neighbors, uint16_t count)
 
 BaseType_t FARMRANGER_tParseLoggerReady(const char *line, void *ctx)
 {
-    if (strcmp(line, "Logger ready\r\n") == 0)
+    if (strstr(line, "Logger ready\r\n") != NULL)
         return pdTRUE;
 
     return pdFALSE;
@@ -411,10 +431,35 @@ BaseType_t FARMRANGER_tParseLoggerReady(const char *line, void *ctx)
 
 BaseType_t FARMRANGER_tParseOK(const char *line, void *ctx)
 {
-    if (strcmp(line, "OK\r\n") == 0)
+    if (!line) return pdFALSE;
+
+    /* Accept RDY anywhere in the line */
+    if (strstr(line, "OK") != NULL)
         return pdTRUE;
 
     return pdFALSE;
+}
+
+BaseType_t FARMRANGER_tParseRDY(const char *line, void *ctx)
+{
+    if (!line) return pdFALSE;
+
+    /* Accept RDY anywhere in the line */
+    if (strstr(line, "RDY") != NULL)
+        return pdTRUE;
+
+    return pdFALSE;
+}
+
+
+void HAL_UART_vTxCompleteISR(hal_uart_t *drv)
+{
+    if (drv == &farmranger.UartHandle)
+    {
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        xSemaphoreGiveFromISR(xUartTxDoneSem, &xHigherPriorityTaskWoken);
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    }
 }
 
 
