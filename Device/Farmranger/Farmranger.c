@@ -259,7 +259,7 @@ void FARMRANGER_vATHandlerTask(void *args)
 
         	if (req.cmd && strlen(req.cmd) > 0)
         	{
-                HAL_UART_u8TxPutBuffer(&farmranger.UartHandle,
+        		HAL_UART_vTxPutBuffer(&farmranger.UartHandle,
                                        (uint8_t*)req.cmd,
                                        strlen(req.cmd));
         	}
@@ -393,7 +393,7 @@ bool FARMRANGER_bLogData(MeshDiscoveredNeighbor_t *neighbors, uint16_t count)
     if (pos > 0)
     {
         // 3. Send the actual payload (CSV buffer)
-        HAL_UART_u8TxPutBuffer(&farmranger.UartHandle,
+    	HAL_UART_vTxPutBuffer(&farmranger.UartHandle,
                                (uint8_t*)logBuffer,
     						   pos);
         /* Wait until TX fully drained */
