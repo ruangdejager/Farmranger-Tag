@@ -26,16 +26,17 @@
 // Discovery timing: reply windows are hop-ordered.
 // Children (larger hop) reply earlier, parents later.
 // Important: MESH_REPLY_JITTER_WINDOW_MS < MESH_BASE_HOP_DELAY_MS
-#define MESH_BASE_HOP_DELAY_MS                  1500   // 1.5 s separation between hop "bands"
-#define MESH_REPLY_JITTER_WINDOW_MS             500    // jitter inside a band
+#define MESH_BASE_HOP_DELAY_MS                  2000   // 1.5 s separation between hop "bands"
+#define MESH_REPLY_JITTER_WINDOW_MS             150    // jitter inside a band
 
 #define MESH_DREQ_FLOOD_DELAY_MS                10000  // unchanged for now
 
 // Number of DRep transmissions per node per discovery round
-#define MESH_DREP_RETRY_COUNT                   3
+#define MESH_DREP_RETRY_COUNT                   1
 #define MESH_DREP_RETRY_DELAY_MS                250    // spacing between retries once window opens
 
 #define MESH_MAX_PARENT_CANDIDATES  			2
+#define MESH_RSSI_HOP_BONUS_DB  				10
 
 
 // --- PACKET STRUCTURES (Common to the mesh protocol) ---

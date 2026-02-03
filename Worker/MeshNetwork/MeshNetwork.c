@@ -18,6 +18,7 @@
 #include "pb_common.h"
 #include "pb.h"
 #include "stdlib.h"
+#include <limits.h>
 
 #include "dbg_log.h"
 #include "DeviceDiscovery.h"
@@ -93,6 +94,7 @@ typedef struct {
     uint8_t  u8ParentCandidateCount;
 
     uint8_t             u8MyHopCountToDReqSender;
+    int16_t             i16BestParentRssi;
     TickType_t          tDReqReceivedTime;
     LocalNeighborEntry_t tLocalDiscoveredDevices[MESH_MAX_LOCAL_DISCOVERED_DEVICES];
     uint8_t             u8LocalDiscoveredDevicesCount;
@@ -546,34 +548,47 @@ void MESHNETWORK_vClearDiscoveredNeighbors(void) {
 
 // --- PRIVATE HELPER FUNCTIONS ---
 
-static void MESHNETWORK_vAddOrUpdateGlobalNeighbor(uint32_t device_id, uint8_t hop_count, int16_t rssi, uint16_t batLevel) {
+static void MESHNETWORK_vAddOrUpdateGlobalNeighbor(uint32_t device_id,
+                                                  uint8_t hop_count,
+                                                  int16_t rssi,
+                                                  uint16_t batLevel)
+{
     if (xSemaphoreTake(xMeshNeighborTableMutex, portMAX_DELAY) == pdTRUE) {
-        bool found = false;
+
         for (uint16_t i = 0; i < u8MeshDiscoveredNeighborsCount; i++) {
             if (tMeshDiscoveredNeighbors[i].device_id == device_id) {
-                // Update if new info is better (lower hop count, or stronger RSSI if hop count is same)
+
                 if (hop_count < tMeshDiscoveredNeighbors[i].hop_count ||
-                    (hop_count == tMeshDiscoveredNeighbors[i].hop_count && rssi > tMeshDiscoveredNeighbors[i].rssi)) {
-                	tMeshDiscoveredNeighbors[i].hop_count = hop_count;
-                	tMeshDiscoveredNeighbors[i].rssi = rssi;
-                	tMeshDiscoveredNeighbors[i].batLevel = batLevel;
+                   (hop_count == tMeshDiscoveredNeighbors[i].hop_count &&
+                    rssi > tMeshDiscoveredNeighbors[i].rssi)) {
+
+                    tMeshDiscoveredNeighbors[i].hop_count = hop_count;
+                    tMeshDiscoveredNeighbors[i].rssi = rssi;
+                    tMeshDiscoveredNeighbors[i].batLevel = batLevel;
                 }
+
                 tMeshDiscoveredNeighbors[i].last_seen = xTaskGetTickCount();
-                found = true;
-                break;
+                xSemaphoreGive(xMeshNeighborTableMutex);
+                return;
             }
         }
-        if (!found && u8MeshDiscoveredNeighborsCount < MESH_MAX_GLOBAL_NEIGHBORS) {
-        	tMeshDiscoveredNeighbors[u8MeshDiscoveredNeighborsCount].device_id = device_id;
-        	tMeshDiscoveredNeighbors[u8MeshDiscoveredNeighborsCount].hop_count = hop_count;
-        	tMeshDiscoveredNeighbors[u8MeshDiscoveredNeighborsCount].rssi = rssi;
-        	tMeshDiscoveredNeighbors[u8MeshDiscoveredNeighborsCount].batLevel = batLevel;
-        	tMeshDiscoveredNeighbors[u8MeshDiscoveredNeighborsCount].last_seen = xTaskGetTickCount();
-        	u8MeshDiscoveredNeighborsCount++;
+
+        // ---- New device: always add ----
+        if (u8MeshDiscoveredNeighborsCount < MESH_MAX_GLOBAL_NEIGHBORS) {
+            tMeshDiscoveredNeighbors[u8MeshDiscoveredNeighborsCount++] =
+                (MeshDiscoveredNeighbor_t){
+                    .device_id = device_id,
+                    .hop_count = hop_count,
+                    .rssi = rssi,
+                    .batLevel = batLevel,
+                    .last_seen = xTaskGetTickCount()
+                };
         }
+
         xSemaphoreGive(xMeshNeighborTableMutex);
     }
 }
+
 
 static void MESHNETWORK_vAddOrUpdateLocalCache(uint32_t device_id, uint8_t hop_count, int16_t rssi, uint16_t batLevel) {
     bool found = false;
@@ -630,31 +645,15 @@ static bool MESHNETWORK_bIsMyParent(uint32_t parent_id)
 
 static TickType_t MESHNETWORK_tCalculateReplyDelay(uint8_t my_hop_count_to_dreq_sender)
 {
-    // Clamp hop count to our configured TTL bound
-    uint8_t clamped_hop = my_hop_count_to_dreq_sender;
-    if (clamped_hop == 0) {
-        // 0 means "I am the original sender" – it never uses this delay anyway,
-        // but keep it sane.
-        clamped_hop = 1;
-    }
-    if (clamped_hop > MESH_MAX_TTL) {
-        clamped_hop = MESH_MAX_TTL;
-    }
+    uint8_t clamped_hop = my_hop_count_to_dreq_sender ? my_hop_count_to_dreq_sender : 1;
+    if (clamped_hop > MESH_MAX_TTL) clamped_hop = MESH_MAX_TTL;
 
-    // Children (larger hop) should reply earlier than parents (smaller hop).
-    // Use MESH_MAX_TTL as an upper bound on maximum hop depth:
-    //
-    //   hop = MESH_MAX_TTL  -> hops_from_edge = 0 -> earliest
-    //   hop = MESH_MAX_TTL-1 -> hops_from_edge = 1 -> a bit later
-    //   ...
-    //   hop = 1            -> hops_from_edge = MESH_MAX_TTL-1 -> latest
-    //
     uint8_t hops_from_edge = (MESH_MAX_TTL - clamped_hop);
 
-    TickType_t delay_ms = (TickType_t)hops_from_edge * MESH_BASE_HOP_DELAY_MS;
-    delay_ms += MESHNETWORK_u32GetRandomNumber(MESH_REPLY_JITTER_WINDOW_MS); // jitter inside band
+    uint32_t delay_ms = (uint32_t)hops_from_edge * MESH_BASE_HOP_DELAY_MS;
+    delay_ms += MESHNETWORK_u32GetRandomNumber(MESH_REPLY_JITTER_WINDOW_MS);
 
-    return delay_ms;
+    return pdMS_TO_TICKS(delay_ms); // return ticks now
 }
 
 
@@ -678,10 +677,30 @@ static void MESHNETWORK_vHandleDReq(const MeshDReqPacket *dreq_packet) {
 	}
 
 	bool isNewRound = (origin->last_dreq_id != dreq_packet->Header.dReqID);
-	bool isBetterPath = (!isNewRound &&
-	                     received_hop_count < CurrentDiscoveryCache.u8MyHopCountToDReqSender);
 
-	if (isNewRound || isBetterPath)
+	uint8_t oldHop = CurrentDiscoveryCache.u8MyHopCountToDReqSender;
+	uint8_t newHop = received_hop_count;
+
+	int16_t oldRssi = CurrentDiscoveryCache.i16BestParentRssi;
+	int16_t newRssi = dreq_packet->Rssi;
+
+	bool accept = false;
+
+	if (isNewRound) {
+	    accept = true;
+	}
+	else if (newHop < oldHop) {
+	    accept = true;
+	}
+	else if (newHop == oldHop && newRssi > oldRssi) {
+	    accept = true;
+	}
+	else if ((newHop == oldHop + 1) &&
+	         (newRssi >= oldRssi + MESH_RSSI_HOP_BONUS_DB)) {
+	    accept = true;
+	}
+
+	if (accept)
 	{
 	    if (isNewRound)
 	    {
@@ -689,6 +708,7 @@ static void MESHNETWORK_vHandleDReq(const MeshDReqPacket *dreq_packet) {
 	        CurrentDiscoveryCache.u32DReqID = dreq_packet->Header.dReqID;
 	        CurrentDiscoveryCache.u32OGDreqSenderID = dreq_packet->OGDreqSenderID;
 	        CurrentDiscoveryCache.tDReqReceivedTime = xTaskGetTickCount();
+	        CurrentDiscoveryCache.i16BestParentRssi = INT16_MIN;
 
 	        origin->last_dreq_id = dreq_packet->Header.dReqID;
 
@@ -699,37 +719,69 @@ static void MESHNETWORK_vHandleDReq(const MeshDReqPacket *dreq_packet) {
 	            dreq_packet->OGDreqSenderID);
 	    }
 
-	    if (CurrentDiscoveryCache.u8MyHopCountToDReqSender == 0 ||
-	        received_hop_count < CurrentDiscoveryCache.u8MyHopCountToDReqSender)
-	    {
-	        CurrentDiscoveryCache.u8MyHopCountToDReqSender = received_hop_count;
-	        MESHNETWORK_vAddParentCandidate(dreq_packet->Header.senderID);
+	    // --- Switch parent ---
+	    CurrentDiscoveryCache.u8MyHopCountToDReqSender = received_hop_count;
+	    CurrentDiscoveryCache.i16BestParentRssi = dreq_packet->Rssi;
 
-	        CurrentDiscoveryCache.tScheduledReplyTime =
-	            CurrentDiscoveryCache.tDReqReceivedTime +
-	            MESHNETWORK_tCalculateReplyDelay(CurrentDiscoveryCache.u8MyHopCountToDReqSender);
+	    CurrentDiscoveryCache.u8ParentCandidateCount = 0;
+	    MESHNETWORK_vAddParentCandidate(dreq_packet->Header.senderID);
 
-	        TickType_t now = xTaskGetTickCount();
-	        TickType_t delay_ticks = 1;
-	        if (CurrentDiscoveryCache.tScheduledReplyTime > now) {
-	            delay_ticks = CurrentDiscoveryCache.tScheduledReplyTime - now;
-	        }
+	    DBG("MeshNetwork: Parent switch to %X (hop=%u, rssi=%d)\r\n",
+	        dreq_packet->Header.senderID,
+	        received_hop_count,
+	        dreq_packet->Rssi);
 
-	        xTimerStop(xMeshReplySchedulerTimer, 0);
-	        xTimerChangePeriod(xMeshReplySchedulerTimer, delay_ticks, 0);
-	        xTimerStart(xMeshReplySchedulerTimer, 0);
+	    // --- Schedule reply ---
+	    CurrentDiscoveryCache.tScheduledReplyTime =
+	        xTaskGetTickCount() +
+	        MESHNETWORK_tCalculateReplyDelay(CurrentDiscoveryCache.u8MyHopCountToDReqSender);
+
+	    TickType_t now = xTaskGetTickCount();
+	    TickType_t delay_ticks = 1;
+	    if (CurrentDiscoveryCache.tScheduledReplyTime > now) {
+	        delay_ticks = CurrentDiscoveryCache.tScheduledReplyTime - now;
 	    }
+
+	    xTimerStop(xMeshReplySchedulerTimer, 0);
+	    xTimerChangePeriod(xMeshReplySchedulerTimer, delay_ticks, 0);
+	    xTimerStart(xMeshReplySchedulerTimer, 0);
 
 	    MESHNETWORK_vAddOrUpdateLocalCache(
 	        MESHNETWORK_u32GetUniqueId(),
 	        CurrentDiscoveryCache.u8MyHopCountToDReqSender,
 	        dreq_packet->Rssi,
-			BAT_u16GetVoltage());
+	        BAT_u16GetVoltage());
+
+	    // --------------------------------------------------
+	    // DREQ FLOODING (controlled)
+	    // --------------------------------------------------
+	    if (dreq_packet->Ttl > 1) {
+
+	        MeshDReqPacket fwd = *dreq_packet;
+
+	        fwd.Header.senderID = MESHNETWORK_u32GetUniqueId();
+	        fwd.Ttl = dreq_packet->Ttl - 1;
+	        fwd.Rssi = 0; // filled by receiver
+
+	        LoraRadio_Packet_t tx;
+	        if (MESHNETWORK_bEncodeDReqMessage(&fwd,
+	                                           tx.buffer,
+	                                           sizeof(tx.buffer),
+	                                           &tx.length))
+	        {
+	            if (MESHNETWORK_bSendMessage(&tx)) {
+	                DBG("MeshNetwork: Forwarded DReq %X ttl=%u\r\n",
+	                    fwd.Header.dReqID, fwd.Ttl);
+	            }
+	        }
+	    }
+
 	}
 	else
 	{
-	    DBG("MeshNetwork: Ignored duplicate/inferior DReq %lu\r\n",
-	        dreq_packet->Header.dReqID);
+	    DBG("MeshNetwork: Ignored inferior DReq (hop=%u rssi=%d)\r\n",
+	        received_hop_count,
+	        dreq_packet->Rssi);
 	}
 
 }
@@ -744,37 +796,116 @@ static void MESHNETWORK_vHandleDRep(const MeshDRepPacket *drep_packet) {
         return;
     }
 
-    // If this DRep is for the original DReq sender (i.e., we are the primary device)
+    // -------------------------------------------------------------
+    // Primary device: accept DReps
+    // -------------------------------------------------------------
     if (MESHNETWORK_u32GetUniqueId() == CurrentDiscoveryCache.u32OGDreqSenderID) {
-        // Add all reported neighbors to the global table
+
+        bool sender_is_direct_child =
+            (drep_packet->ParentID == MESHNETWORK_u32GetUniqueId());
+
         uint8_t num_entries = drep_packet->NeighborList_count;
-        if (num_entries > MESH_MAX_NEIGHBORS_PER_PACKET) num_entries = MESH_MAX_NEIGHBORS_PER_PACKET; // Safety check
+        if (num_entries > MESH_MAX_NEIGHBORS_PER_PACKET)
+            num_entries = MESH_MAX_NEIGHBORS_PER_PACKET;
 
         for (uint8_t i = 0; i < num_entries; i++) {
-            MESHNETWORK_vAddOrUpdateGlobalNeighbor(drep_packet->NeighborList[i].deviceID,
-                                                      drep_packet->NeighborList[i].hopCount,
-                                                      drep_packet->NeighborList[i].rssi,
-													  drep_packet->NeighborList[i].batVoltage);
+
+            MeshNeighborInfo *n = &drep_packet->NeighborList[i];
+
+            // ❌ Drop self-entry from non-direct children
+            if (!sender_is_direct_child &&
+                n->deviceID == drep_packet->Header.senderID) {
+                continue;
+            }
+
+            MESHNETWORK_vAddOrUpdateGlobalNeighbor(
+                n->deviceID,
+                n->hopCount,
+                n->rssi,
+                n->batVoltage);
         }
-        DBG("MeshNetwork: Primary Device %X: Received DRep from %X, added %X neighbors.\r\n",
-        		MESHNETWORK_u32GetUniqueId(), drep_packet->Header.senderID, drep_packet->NeighborList_count);
+
+        DBG("MeshNetwork: Primary accepted DRep from %X (direct=%d)\r\n",
+            drep_packet->Header.senderID,
+            sender_is_direct_child);
     }
+
     // If we are an intermediate relay node and this DRep is from a downstream child
-    else if (MESHNETWORK_bIsMyParent(drep_packet->ParentID)) {
-        DBG("MeshNetwork: Received DRep from downstream %X, num_neighbors %X\r\n",
-               drep_packet->Header.senderID, drep_packet->NeighborList_count);
-        // Add all reported neighbors to our local cache for potential relaying
+    /* ------------------ intermediate handling of child DRep ------------------ */
+    else if (drep_packet->ParentID == MESHNETWORK_u32GetUniqueId())
+    {
+
         uint8_t num_entries = drep_packet->NeighborList_count;
-        if (num_entries > MESH_MAX_NEIGHBORS_PER_PACKET) num_entries = MESH_MAX_NEIGHBORS_PER_PACKET; // Safety check
+        if (num_entries > MESH_MAX_NEIGHBORS_PER_PACKET) num_entries = MESH_MAX_NEIGHBORS_PER_PACKET;
+
+        TickType_t now = xTaskGetTickCount();
+        bool added_any = false;
 
         for (uint8_t i = 0; i < num_entries; i++) {
-            MESHNETWORK_vAddOrUpdateLocalCache(drep_packet->NeighborList[i].deviceID,
-                                                  drep_packet->NeighborList[i].hopCount,
-                                                  drep_packet->NeighborList[i].rssi,
-												  drep_packet->NeighborList[i].batVoltage);
+
+            uint8_t adjusted_hop = drep_packet->NeighborList[i].hopCount + 1;
+
+            /* Add/update local cache with child's neighbor entries (increment hop). */
+            MESHNETWORK_vAddOrUpdateLocalCache(
+                drep_packet->NeighborList[i].deviceID,
+                adjusted_hop,
+                drep_packet->NeighborList[i].rssi,
+                drep_packet->NeighborList[i].batVoltage);
+
+            added_any = true;
+            DBG("MeshNetwork: Intermediate %X added child-entry ID=%X hop=%u rssi=%d\r\n",
+                MESHNETWORK_u32GetUniqueId(),
+                drep_packet->NeighborList[i].deviceID,
+                adjusted_hop,
+                drep_packet->NeighborList[i].rssi);
         }
-        // NEW: Signal the reply scheduler to potentially send an updated DRep upstream
-        xEventGroupSetBits(xMeshReplySchedulerEventGroup, MESH_REPLY_SCHEDULE_BIT);
+
+        /*
+         * Important: when a downstream child sends a DRep, give the node a short
+         * propagation window so it can collect further DReps from other children
+         * before it composes its own upstream DRep.
+         *
+         * Strategy:
+         *  - compute a small wait equal to one base-hop delay (plus jitter)
+         *  - ensure tScheduledReplyTime is at least now + wait
+         *  - restart reply timer accordingly
+         */
+
+        if (added_any) {
+            TickType_t child_wait = pdMS_TO_TICKS(MESH_BASE_HOP_DELAY_MS) +
+                                    pdMS_TO_TICKS(MESHNETWORK_u32GetRandomNumber(MESH_REPLY_JITTER_WINDOW_MS));
+
+            TickType_t new_sched = now + child_wait;
+
+            if (CurrentDiscoveryCache.tScheduledReplyTime < new_sched) {
+                CurrentDiscoveryCache.tScheduledReplyTime = new_sched;
+                CurrentDiscoveryCache.u8DRepAttempts = 0; // reset attempts so we try fresh after new data
+
+                /* start/adjust the reply timer to fire at tScheduledReplyTime */
+                TickType_t delay_ticks = (CurrentDiscoveryCache.tScheduledReplyTime > now) ?
+                                          (CurrentDiscoveryCache.tScheduledReplyTime - now) : 1;
+
+                xTimerStop(xMeshReplySchedulerTimer, 0);
+                xTimerChangePeriod(xMeshReplySchedulerTimer, delay_ticks, 0);
+                xTimerStart(xMeshReplySchedulerTimer, 0);
+
+                DBG("MeshNetwork: Intermediate %X extended scheduled reply by %lu ms (now %lu -> sched %lu)\r\n",
+                    MESHNETWORK_u32GetUniqueId(),
+                    (unsigned long)child_wait,
+                    (unsigned long)now,
+                    (unsigned long)CurrentDiscoveryCache.tScheduledReplyTime);
+            } else {
+                DBG("MeshNetwork: Intermediate %X received child DRep but existing schedule (%lu) is later than new (%lu)\r\n",
+                    MESHNETWORK_u32GetUniqueId(),
+                    (unsigned long)CurrentDiscoveryCache.tScheduledReplyTime,
+                    (unsigned long)new_sched);
+            }
+        }
+
+        /* Trigger upstream relay evaluation (reply scheduler task will check scheduled time) */
+        xEventGroupSetBits(xMeshReplySchedulerEventGroup,
+                           MESH_REPLY_SCHEDULE_BIT);
+
     } else {
         // DRep not for us or irrelevant for current discovery round
     	DBG("MeshNetwork: Ignored DRep from %X (parent %X not in my parent set).\r\n",
