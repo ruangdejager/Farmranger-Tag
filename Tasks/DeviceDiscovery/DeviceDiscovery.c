@@ -80,6 +80,9 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 			pdFALSE,
 			portMAX_DELAY);
 
+		/* Clear table for next campaign */
+		MESHNETWORK_vClearDiscoveredNeighbors();
+
 		DBG("DeviceDiscovery %X: Woke up for discovery.\r\n",
 			LORARADIO_u32GetUniqueId());
 
@@ -155,21 +158,22 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 
 		if (eDeviceRole == DEVICE_ROLE_PRIMARY)
 		{
-			DBG("DeviceDiscovery %X: Final UNION Result: %u neighbors discovered.\r\n",
-				LORARADIO_u32GetUniqueId(), actual_count);
+
 			/* Pull union of discovered neighbors */
 			MeshDiscoveredNeighbor_t tNeighbors[MESH_MAX_NEIGHBORS];
 			uint16_t u16NeighborCount = 0;
 
 			if (MESHNETWORK_bGetDiscoveredNeighbors(tNeighbors, MESH_MAX_NEIGHBORS, &u16NeighborCount))
 			{
+				DBG("DeviceDiscovery %X: Final UNION Result: %u neighbors discovered.\r\n",
+					LORARADIO_u32GetUniqueId(), u16NeighborCount);
 				for (uint16_t i = 0; i < u16NeighborCount; i++)
 				{
 					DBG("  ID:%X  Hops:%X  RSSI:%d  Bat:%d\r\n",
-							tNeighbors[i].device_id,
-							tNeighbors[i].hop_count,
-							tNeighbors[i].rssi,
-							tNeighbors[i].batLevel);
+							tNeighbors[i].u32DeviceId,
+							tNeighbors[i].u8HopCount,
+							tNeighbors[i].i16Rssi,
+							tNeighbors[i].u16BatMv);
 				}
 			}
 			else
@@ -229,9 +233,6 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 			// Secondary nodes just chill after rounds
 			vTaskDelay(pdMS_TO_TICKS(5000));
 		}
-
-		/* Clear table for next campaign */
-		MESHNETWORK_vClearDiscoveredNeighbors();
 
 		// ---------------------------------------------------------------------
 		// 6. Decide sleep strategy: normal sleep, recovery mode, or stay-awake

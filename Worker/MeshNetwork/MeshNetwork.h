@@ -149,7 +149,6 @@ TickType_t MESHNETWORK_tGetLastBeaconHeardTick(void);
 
 uint64_t MESHNETWORK_u64GetLastPrimaryHeardTick(void);
 void MESHNETWORK_vUpdatePrimaryLastSeen(void);
-uint32_t MESHNETWORK_u32GenerateGlobalMsgID(void);
 
 void MESHNETWORK_vKickPrimaryAck(void);
 
