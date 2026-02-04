@@ -26,10 +26,11 @@
 
 // --- PRIVATE FREE_RTOS RESOURCES ---
 static EventGroupHandle_t xDiscoveryEventGroup;
-DiscoveryDeviceRole tDeviceRole;
+DeviceRole_e eDeviceRole;
 BaseType_t status;
 
 static void DEVICE_DISCOVERY_vRecoveryMode(void);
+static void DEVICE_DISCOVERY_vSendTS(void);
 
 // --- PUBLIC FUNCTIONS ---
 
@@ -49,44 +50,29 @@ void DEVICE_DISCOVERY_vInit(void) {
                 NULL);
     configASSERT(status == pdPASS);
 
-    tDeviceRole = (DiscoveryDeviceRole)HAL_GPIO_ReadPin(BSP_VERSION_BIT0_PORT, BSP_VERSION_BIT0_PIN);
+    eDeviceRole = (DeviceRole_e)HAL_GPIO_ReadPin(BSP_VERSION_BIT0_PORT, BSP_VERSION_BIT0_PIN);
     HAL_GPIO_DeInit(BSP_VERSION_BIT0_PORT, BSP_VERSION_BIT0_PIN);
 
     DBG("DeviceDiscovery: Initialized FreeRTOS resources and created DeviceDiscoveryAppTask.\r\n");
+    if (eDeviceRole)
+    {
+    	DBG("DeviceDiscovery: Device Role = PRIMARY\r\n");
+    } else {
+    	DBG("DeviceDiscovery: Device Role = SECONDARY\r\n");
+    }
+
+
 }
 
 void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 {
 	(void)pvParameters;
 
-	// Configuration — how many discovery rounds per wakeup?
-	const uint8_t DISCOVERY_ROUNDS = 3;   // <---- Tune this based on reliability needs
-
-#ifdef TEST_LORA_LED
-LoraRadio_Packet_t myPacket;
-#endif
-
-
 	for (;;) {
 
-#ifdef TEST_LORA_LED
-while (1)
-{
-	vTaskDelay(pdMS_TO_TICKS(1000));
-	myPacket.buffer[0] = 0xAA;
-	myPacket.buffer[1] = 0xBB;
-	myPacket.buffer[2] = 0xCC;
-	myPacket.length = 3;
-	if (tDeviceRole == DEVICE_PRIMARY){
-		LORARADIO_bTxPacket(&myPacket);
-	}
-}
-#endif
-
 		// ---------------------------------------------------------------------
-		// 1. Wake-up Synchronization
+		// Waiting for synchronized wake-up...
 		// ---------------------------------------------------------------------
-		DBG("DeviceDiscovery: Waiting for synchronized wake-up...\r\n");
 		xEventGroupWaitBits(
 			xDiscoveryEventGroup,
 			DISCOVERY_WAKEUP_BIT,
@@ -99,72 +85,91 @@ while (1)
 
 		vTaskDelay(pdMS_TO_TICKS(APP_WAKEUP_BUFFER_MS));
 
-		// ---------------------------------------------------------------------
-		// 2. Clear global neighbor table BEFORE multi-round campaign
-		// ---------------------------------------------------------------------
-		if (tDeviceRole == DEVICE_PRIMARY)
+		if (eDeviceRole == DEVICE_ROLE_PRIMARY)
 		{
-			DBG("DeviceDiscovery %X: Clearing neighbor table for new campaign.\r\n",
+
+			/* Start discovery waves until silence */
+			bool bDiscoveryFinished = false;
+			DBG("Primary: starting discovery campaign");
+
+			while (!bDiscoveryFinished)
+			{
+				uint32_t u32DreqId = MESHNETWORK_u32GenerateGlobalMsgID();
+				bool bBeaconSeenThisWave = false;
+
+				MESHNETWORK_bStartDiscoveryRound(u32DreqId);
+
+				TickType_t tWaveStartTick = xTaskGetTickCount();
+				TickType_t tLastBeaconTick = tWaveStartTick;
+
+				/* ---- Monitor beacon activity for this wave ---- */
+				for (;;)
+				{
+					/* periodically attempt ACKs */
+					MESHNETWORK_vKickPrimaryAck();
+					vTaskDelay(pdMS_TO_TICKS(500));
+
+					TickType_t tNow = xTaskGetTickCount();
+					TickType_t tMeshLastBeacon = MESHNETWORK_tGetLastBeaconHeardTick();
+
+					if (tMeshLastBeacon != tLastBeaconTick)
+					{
+						bBeaconSeenThisWave = true;
+						tLastBeaconTick = tMeshLastBeacon;
+					}
+
+					/* idle window elapsed */
+					if ((tNow - tLastBeaconTick) > pdMS_TO_TICKS(MESH_DISCOVERY_IDLE_MS))
+					{
+						break;
+					}
+
+				}
+
+
+				if (!bBeaconSeenThisWave)
+				{
+					/* No devices responded at this distance -> discovery complete */
+					bDiscoveryFinished = true;
+				} else
+				{
+					DBG("Primary: extending discovery with new DReq wave");
+				}
+			}
+
+		} else
+		{
+
+			DBG("DeviceDiscovery %X: Secondary waiting for discovery period timeout.\r\n",
 				LORARADIO_u32GetUniqueId());
-			MESHNETWORK_vClearDiscoveredNeighbors();
-		}
-
-		// ---------------------------------------------------------------------
-		// 3. Run MULTIPLE DISCOVERY ROUNDS (Primary only initiates)
-		// ---------------------------------------------------------------------
-		for (uint8_t round = 0; round < DISCOVERY_ROUNDS; round++)
-		{
-			if (tDeviceRole == DEVICE_PRIMARY)
-			{
-
-				// Generate a base DReqID so each round gets unique IDs
-				uint32_t dreq_id = MESHNETWORK_u32GenerateGlobalMsgID();
-
-				DBG("DeviceDiscovery %X: Starting Discovery Round %X (DReqID=%X)\r\n",
-					LORARADIO_u32GetUniqueId(),
-					round,
-					dreq_id);
-
-				MESHNETWORK_bStartDiscoveryRound(
-					dreq_id,
-					LORARADIO_u32GetUniqueId());
-			}
-			else
-			{
-				DBG("DeviceDiscovery %X: Secondary waiting for DReq flood in Round %X\r\n",
-					LORARADIO_u32GetUniqueId(), round);
-			}
-
 			// Wait for this round's window to complete
 			vTaskDelay(pdMS_TO_TICKS(APP_DISCOVERY_WINDOW_MS));
+
 		}
 
 		// ---------------------------------------------------------------------
-		// 4. ALL ROUNDS DONE — Primary Processes the UNION of all neighbors
+		// Primary Processes the UNION of all neighbors
 		// ---------------------------------------------------------------------
-		DBG("DeviceDiscovery %X: Multi-round discovery campaign complete.\r\n",
+		DBG("DeviceDiscovery %X: Discovery complete.\r\n",
 			LORARADIO_u32GetUniqueId());
 
-		if (tDeviceRole == DEVICE_PRIMARY)
+		if (eDeviceRole == DEVICE_ROLE_PRIMARY)
 		{
-			MeshDiscoveredNeighbor_t discovered_neighbors_buffer[250];
-			uint16_t actual_count = 0;
+			DBG("DeviceDiscovery %X: Final UNION Result: %u neighbors discovered.\r\n",
+				LORARADIO_u32GetUniqueId(), actual_count);
+			/* Pull union of discovered neighbors */
+			MeshDiscoveredNeighbor_t tNeighbors[MESH_MAX_NEIGHBORS];
+			uint16_t u16NeighborCount = 0;
 
-			if (MESHNETWORK_bGetDiscoveredNeighbors(discovered_neighbors_buffer,
-													250,
-													&actual_count))
+			if (MESHNETWORK_bGetDiscoveredNeighbors(tNeighbors, MESH_MAX_NEIGHBORS, &u16NeighborCount))
 			{
-				DBG("DeviceDiscovery %X: Final UNION Result: %u neighbors discovered.\r\n",
-					LORARADIO_u32GetUniqueId(), actual_count);
-
-				for (uint16_t i = 0; i < actual_count; i++)
+				for (uint16_t i = 0; i < u16NeighborCount; i++)
 				{
-					DBG("  ID:%X  Hops:%X  RSSI:%d  Bat:%d  LastSeen:%lu\r\n",
-						discovered_neighbors_buffer[i].device_id,
-						discovered_neighbors_buffer[i].hop_count,
-						discovered_neighbors_buffer[i].rssi,
-						discovered_neighbors_buffer[i].batLevel,
-						discovered_neighbors_buffer[i].last_seen);
+					DBG("  ID:%X  Hops:%X  RSSI:%d  Bat:%d\r\n",
+							tNeighbors[i].device_id,
+							tNeighbors[i].hop_count,
+							tNeighbors[i].rssi,
+							tNeighbors[i].batLevel);
 				}
 			}
 			else
@@ -175,7 +180,7 @@ while (1)
 
 #ifndef ENABLE_DBG_UART
 			// -----------------------------------------------------------------
-			// 5. Existing PROCESSING — Logger Connection + Upload + Time Sync
+			// Logger Connection + Upload + Time Sync
 			// -----------------------------------------------------------------
 			if (DEVICE_DISCOVERY_DRIVER_bConnectLogger())
 			{
@@ -185,8 +190,8 @@ while (1)
 			DBG("DeviceDiscovery %X: Logger connected.\r\n",
 				LORARADIO_u32GetUniqueId());
 
-			if (DEVICE_DISCOVERY_bSendDiscoveryData(discovered_neighbors_buffer,
-													actual_count))
+			if (DEVICE_DISCOVERY_bSendDiscoveryData(tNeighbors,
+					u16NeighborCount))
 			{
 				DBG("DeviceDiscovery %X: Log SUCCESS.\r\n",
 					LORARADIO_u32GetUniqueId());
@@ -197,8 +202,6 @@ while (1)
 					LORARADIO_u32GetUniqueId());
 				vTaskDelay(pdMS_TO_TICKS(5000));
 			}
-
-//			vTaskDelay(pdMS_TO_TICKS(1000));
 
 			// Timestamp sync
 			uint64_t now = DEVICE_DISCOVERY_DRIVER_u64RequestTS();
@@ -215,15 +218,20 @@ while (1)
 			BSP_LED_Off(LED_GREEN);
 #endif
 
+			/* Discovery finished: send TimeSync */
 			DEVICE_DISCOVERY_vSendTS();
+
 			vTaskDelay(pdMS_TO_TICKS(5000));
 
 		}
 		else
 		{
 			// Secondary nodes just chill after rounds
-			vTaskDelay(pdMS_TO_TICKS(10000));
+			vTaskDelay(pdMS_TO_TICKS(5000));
 		}
+
+		/* Clear table for next campaign */
+		MESHNETWORK_vClearDiscoveredNeighbors();
 
 		// ---------------------------------------------------------------------
 		// 6. Decide sleep strategy: normal sleep, recovery mode, or stay-awake
@@ -232,7 +240,7 @@ while (1)
 		uint64_t last_heard = MESHNETWORK_u64GetLastPrimaryHeardTick();
 
 		// ---- A: Enter Recovery Mode ----
-		if (tDeviceRole == DEVICE_SECONDARY &&
+		if (eDeviceRole == DEVICE_ROLE_SECONDARY &&
 		    (now - last_heard) > LOST_PRIMARY_TIMEOUT_MIN*60)
 		{
 		    DBG("Node %X: ENTERING RECOVERY MODE.\r\n", LORARADIO_u32GetUniqueId());
@@ -241,6 +249,8 @@ while (1)
 		// ---- B: Deep sleep normally ----
 		else
 		{
+			DBG("DeviceDiscovery: Waiting for synchronized wake-up...\r\n");
+			vTaskDelay(pdMS_TO_TICKS(100));
 		    LORARADIO_vEnterDeepSleep();
 		    SYSTEM_vActivateDeepSleep();
 		}
@@ -259,7 +269,7 @@ void DEVICE_DISCOVERY_vCheckWakeupSchedule(void)
 
 		SYSTEM_vDeactivateDeepSleep();
 
-		if (tDeviceRole == DEVICE_PRIMARY)
+		if (eDeviceRole == DEVICE_ROLE_PRIMARY)
 		{
 			FARMRANGER_vUartOnWake();
 		}
@@ -278,16 +288,15 @@ void DEVICE_DISCOVERY_vCheckWakeupSchedule(void)
 }
 
 
-void DEVICE_DISCOVERY_vSendTS(void)
+static void DEVICE_DISCOVERY_vSendTS(void)
 {
     DBG("\r\n--- START TIMESYNC ---\r\n");
-    uint32_t current_ts_id = MESHNETWORK_u32GenerateGlobalMsgID();
-    MESHNETWORK_vSendTimesyncMessage(current_ts_id, RTC_u64GetUTC(), MESHNETWORK_tGetCurrentWakeupIntervalEnum());
+	MESHNETWORK_vSendTimeSync(RTC_u64GetUTC(), MESHNETWORK_tGetWakeupInterval());
 }
 
-DiscoveryDeviceRole DEVICE_DISCOVERY_tGetDeviceRole(void)
+DeviceRole_e DEVICE_DISCOVERY_eGetDeviceRole(void)
 {
-    return tDeviceRole;
+    return eDeviceRole;
 }
 
 // ======================================================================
@@ -298,11 +307,9 @@ static void DEVICE_DISCOVERY_vRecoveryMode(void)
     DBG("RecoveryMode: Node %X LISTENING for primary.\r\n",
         LORARADIO_u32GetUniqueId());
 
-//    LORARADIO_vSetRxContinuous();
-
     for (uint8_t i = 0; i < 120*60; i++)
     {
-        vTaskDelay(pdMS_TO_TICKS(1000));  // 1 minute
+        vTaskDelay(pdMS_TO_TICKS(1000));  // 1 second
 
         uint64_t last_heard = MESHNETWORK_u64GetLastPrimaryHeardTick();
 
