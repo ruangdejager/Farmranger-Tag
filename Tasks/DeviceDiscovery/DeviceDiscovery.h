@@ -13,11 +13,14 @@
 #include "MeshNetwork.h" // Includes MeshDiscoveredNeighbor_t
 
 // Discovery Timing
-#define APP_WAKEUP_BUFFER_MS        (10 * 1000) // 10 seconds buffer after synchronized wake-up
-#define APP_DISCOVERY_WINDOW_MS     (60 * 1000) // 60 seconds for the entire discovery process
+#define APP_WAKEUP_BUFFER_MS       			 (5 * 1000) // 10 seconds buffer after synchronized wake-up
+#define APP_DISCOVERY_WINDOW_TIMEOUT_MS      (180 * 1000) // 60 seconds for the entire discovery process
 
 // Event Group Bits for synchronized wake-up
 #define DISCOVERY_WAKEUP_BIT    (1UL << 0UL) // Set by external RTC/timer for synchronized wake-up
+/* Notifications from MeshNetwork */
+#define DEVICE_DISCOVERY_NOTIFY_TIMESYNC   (1UL << 0)
+
 
 #define DEVICE_DISCOVERY_DRIVER_bConnectLogger() 						FARMRANGER_bDeviceOn()
 #define DEVICE_DISCOVERY_DRIVER_vDisconnectLogger() 					FARMRANGER_vDeviceOff()
@@ -44,5 +47,7 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters);
 void DEVICE_DISCOVERY_vCheckWakeupSchedule(void);
 
 DeviceRole_e DEVICE_DISCOVERY_eGetDeviceRole(void);
+
+TaskHandle_t DEVICE_DISCOVERY_xGetTaskHandle(void);
 
 #endif /* TASKS_DEVICEDISCOVERY_DEVICEDISCOVERY_H_ */

@@ -54,14 +54,36 @@ static const uint8_t u8CurrentWakeupIntervalMin[] = {
 [WAKEUP_INTERVAL_120_MIN] = 120
 };
 
+static const char * const MeshPktTypeStr[] =
+{
+    [MeshPktType_Reserved] = "Reserved",
+    [MeshPktType_DReq]     = "DReq",
+    [MeshPktType_DBeacon]  = "DBeacon",
+    [MeshPktType_DAck]     = "DAck",
+    [MeshPktType_TimeSync] = "TimeSync"
+};
+
+typedef struct
+{
+    uint8_t  u8Buf[128];
+    size_t   u32Len;
+    bool     bPending;
+} MeshJitterTx_t;
+
+static MeshJitterTx_t tJitterTx;
+static TimerHandle_t xJitterTxTimer = NULL;
+
 /* local msg counter */
 static uint16_t u16MsgCounter = 0;
-
-static uint32_t u32LastSeenTimeSyncID = 0;
-
 static uint64_t u64LastPrimaryHeardTick = 0;
-
 static int16_t i16LastDreqRssi = 0;
+
+static bool MESHNETWORK_bSendPktJittered(const uint8_t *pBuf,
+                                        size_t u32Len);
+
+/* Local node controls */
+static void MESHNETWORK_vStartBeaconing(uint32_t u32DreqId, uint8_t u8HopCount);
+static void MESHNETWORK_vStopBeaconing(uint32_t u32DreqId);
 
 
 /* ------------------------------------------------------------------ */
@@ -133,6 +155,7 @@ static void NEIGHBOR_vAddOrUpdate(uint32_t u32DeviceId, uint8_t u8HopCount, int1
             tNeighborTable[u16NeighborCount].u32DeviceId = u32DeviceId;
             tNeighborTable[u16NeighborCount].u8HopCount = u8HopCount;
             tNeighborTable[u16NeighborCount].u16BatMv = u16BatMv;
+            tNeighborTable[u16NeighborCount].i16Rssi = i16Rssi;
             tNeighborTable[u16NeighborCount].bAcked = false;
             u16NeighborCount++;
             tLastBeaconHeardTick = xTaskGetTickCount();
@@ -202,9 +225,68 @@ static bool TX_bSendRaw(const uint8_t *pBuf, size_t u32Len) {
     if (u32Len > sizeof(tTx.buffer)) return false;
     memcpy(tTx.buffer, pBuf, u32Len);
     tTx.length = (uint16_t)u32Len;
-    DBG("TX: type=%u len=%u", pBuf[0], (unsigned)u32Len);
+    DBG("MeshNetwork: Transmitting %s len=%u\r\n", MeshPktTypeStr[pBuf[0]], (unsigned)u32Len);
     return LORARADIO_bTxPacket(&tTx);
 }
+
+static uint32_t MESHNETWORK_u32GetTxJitterMs(void)
+{
+    uint32_t u32Range = MESH_TX_JITTER_MAX_MS - MESH_TX_JITTER_MIN_MS;
+    return MESH_TX_JITTER_MIN_MS + (rand() % (u32Range + 1));
+}
+
+static void MESHNETWORK_vJitterTxTimerCb(TimerHandle_t xTimer)
+{
+    (void)xTimer;
+
+    if (!tJitterTx.bPending)
+        return;
+
+    DBG("MeshNetwork: Jitter TX firing (len=%u)\r\n",
+        (unsigned)tJitterTx.u32Len);
+
+    TX_bSendRaw(tJitterTx.u8Buf, tJitterTx.u32Len);
+    tJitterTx.bPending = false;
+}
+
+static bool MESHNETWORK_bSendPktJittered(const uint8_t *pBuf,
+                                        size_t u32Len)
+{
+    if (pBuf == NULL || u32Len == 0 || u32Len > sizeof(tJitterTx.u8Buf))
+    {
+        return false;
+    }
+
+    /* Overwrite any pending jittered TX (intentional backpressure) */
+    memcpy(tJitterTx.u8Buf, pBuf, u32Len);
+    tJitterTx.u32Len   = u32Len;
+    tJitterTx.bPending = true;
+
+    uint32_t u32JitterMs = MESHNETWORK_u32GetTxJitterMs();
+
+    /* Arm one-shot timer */
+    if (xTimerChangePeriod(
+            xJitterTxTimer,
+            pdMS_TO_TICKS(u32JitterMs),
+            0) != pdPASS)
+    {
+        tJitterTx.bPending = false;
+        return false;
+    }
+
+    if (xTimerStart(xJitterTxTimer, 0) != pdPASS)
+    {
+        tJitterTx.bPending = false;
+        return false;
+    }
+
+    DBG("MeshNetwork: TX jittered (%lu ms, len=%u)\r\n",
+        u32JitterMs,
+        (unsigned)u32Len);
+
+    return true;
+}
+
 
 /* ------------------------------------------------------------------ */
 /* Timers callbacks */
@@ -219,10 +301,12 @@ static void MESHNETWORK_vBeaconTimerCallback(TimerHandle_t xTimer) {
     tBeacon.i16Rssi = i16LastDreqRssi;
     tBeacon.u32BeaconMsgId = MESHNETWORK_u32GenerateGlobalMsgID();
 
+    DBG("MeshNetwork: Sending Beacon %08X\r\n", tBeacon.u32BeaconMsgId);
+
     uint8_t u8Buf[64]; size_t u32Len=0;
     if (!ENCODE_bDBeacon(&tBeacon, u8Buf, sizeof(u8Buf), &u32Len)) return;
     FORWARD_vAdd(tBeacon.u32BeaconMsgId); /* avoid forwarding own beacon */
-    (void)TX_bSendRaw(u8Buf, u32Len);
+    MESHNETWORK_bSendPktJittered(u8Buf, u32Len);;
 }
 
 static void MESHNETWORK_vPrimaryAckTimerCallback(TimerHandle_t xTimer) {
@@ -247,7 +331,7 @@ static void MESHNETWORK_vPrimaryAckTimerCallback(TimerHandle_t xTimer) {
             uint8_t u8Buf[128]; size_t u32Len=0;
             if (ENCODE_bDAck(&tAck, u8Buf, sizeof(u8Buf), &u32Len)) {
                 FORWARD_vAdd(tAck.u32AckMsgId);
-                (void)TX_bSendRaw(u8Buf, u32Len);
+                MESHNETWORK_bSendPktJittered(u8Buf, u32Len);
             }
         }
     }
@@ -262,7 +346,7 @@ static void MESHNETWORK_vHandleDReq(const uint8_t *pBuf, size_t u32Len, int16_t 
     uint32_t u32SenderId = read_u32_be(&pBuf[9]);
     uint8_t u8SenderHopCount = pBuf[13];
 
-    DBG("RX DReq: dreq=%08X origin=%08X sender=%08X hop=%u rssi=%d",
+    DBG("MeshNetwork: DReq received: dreq=%08X origin=%04X sender=%04X hop=%u rssi=%d\r\n",
     		u32DreqId, u32OriginId, u32SenderId, u8SenderHopCount, s16Rssi);
 
     /* Capture RSSI of the received DReq */
@@ -277,61 +361,89 @@ static void MESHNETWORK_vHandleDReq(const uint8_t *pBuf, size_t u32Len, int16_t 
             uint8_t u8Out[32]; size_t u32OutLen=0;
             if (ENCODE_bDReq(u32DreqId, u32OriginId, LORARADIO_u32GetUniqueId(), (uint8_t)(u8SenderHopCount + 1), u8Out, sizeof(u8Out), &u32OutLen)) {
                 FORWARD_vAdd(u32DreqId);
-                (void)TX_bSendRaw(u8Out, u32OutLen);
+                MESHNETWORK_bSendPktJittered(u8Out, u32OutLen);
+                DBG("MeshNetwork: DReq forwarded\r\n");
             }
+        } else {
+        	DBG("MeshNetwork: DReq seen before\r\n");
         }
     } else {
         /* non-forwarder: start beaconing */
-        if (!bNodeBeaconing || u32NodeBeaconDreqId != u32DreqId) {
-            bNodeBeaconing = true;
-            u32NodeBeaconDreqId = u32DreqId;
-            u8NodeHopCount = (uint8_t)(u8SenderHopCount + 1);
-            eNodeRole = NODE_ROLE_BEACONING;
-            xTimerStart(xBeaconTimer, 0);
-            DBG("Node %08X: start beaconing for dreq %08X hop %u", LORARADIO_u32GetUniqueId(), u32DreqId, u8NodeHopCount);
-        }
+    	MESHNETWORK_vStartBeaconing(u32DreqId, (uint8_t)(u8SenderHopCount + 1));
+    	/* Force callback to immediately fire, then wait for the beacon timer */
+    	MESHNETWORK_vBeaconTimerCallback(xBeaconTimer);
     }
 }
 
-static void MESHNETWORK_vHandleDBeacon(const uint8_t *pBuf, size_t u32Len, int16_t s16Rssi) {
-    if (u32Len < 16) return;
+static void MESHNETWORK_vHandleDBeacon(const uint8_t *pBuf,
+                                      size_t u32Len,
+                                      int16_t s16Rssi)
+{
+    if (u32Len < 18) return;
+
     MeshPktDBeacon_t tBeacon;
-    tBeacon.u32DreqId       = read_u32_be(&pBuf[1]);
-    tBeacon.u32DeviceId     = read_u32_be(&pBuf[5]);
-    tBeacon.u16BatMv        = read_u16_be(&pBuf[9]);
-    tBeacon.u8HopCount      = pBuf[11];
-    tBeacon.i16Rssi         = read_s16_be(&pBuf[12]);
-    tBeacon.u32BeaconMsgId  = read_u32_be(&pBuf[14]);
+    tBeacon.u32DreqId      = read_u32_be(&pBuf[1]);
+    tBeacon.u32DeviceId    = read_u32_be(&pBuf[5]);
+    tBeacon.u16BatMv       = read_u16_be(&pBuf[9]);
+    tBeacon.u8HopCount     = pBuf[11];
+    tBeacon.i16Rssi        = read_s16_be(&pBuf[12]);
+    tBeacon.u32BeaconMsgId = read_u32_be(&pBuf[14]);
 
-    DBG("RX Beacon: dev=%08X dreq=%08X hop=%u bat=%u rssi=%d id=%08X", tBeacon.u32DeviceId, tBeacon.u32DreqId, tBeacon.u8HopCount, tBeacon.u16BatMv, tBeacon.i16Rssi, tBeacon.u32BeaconMsgId);
+    DBG("MeshNetwork: Received Beacon: dev=%04X dreq=%08X hop=%u bat=%u rssi=%d id=%08X\r\n",
+        tBeacon.u32DeviceId,
+        tBeacon.u32DreqId,
+        tBeacon.u8HopCount,
+        tBeacon.u16BatMv,
+        tBeacon.i16Rssi,
+        tBeacon.u32BeaconMsgId);
 
-    /* dedupe */
-    if (FORWARD_bHasSeen(tBeacon.u32BeaconMsgId)) {
-        /* if primary and device was acked -> mark unacked to requeue */
-        if (xSemaphoreTake(xNeighborTableMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-            for (uint16_t i=0;i<u16NeighborCount;i++) {
-                if (tNeighborTable[i].u32DeviceId == tBeacon.u32DeviceId) {
-                    if (tNeighborTable[i].bAcked) tNeighborTable[i].bAcked = false;
-                    break;
-                }
-            }
-            xSemaphoreGive(xNeighborTableMutex);
-        }
+    /* ---------------------------------------------------------
+     * 1. DEDUPLICATE FIRST (all roles)
+     * --------------------------------------------------------- */
+    if (FORWARD_bHasSeen(tBeacon.u32BeaconMsgId))
+    {
+        DBG("MeshNetwork: Beacon seen before\r\n");
+        tLastBeaconHeardTick = xTaskGetTickCount(); /* liveness only */
+        return;
+    }
+
+    /* ---------------------------------------------------------
+     * 2. MARK AS SEEN IMMEDIATELY (all roles)
+     * --------------------------------------------------------- */
+    FORWARD_vAdd(tBeacon.u32BeaconMsgId);
+
+    /* ---------------------------------------------------------
+     * 3. PRIMARY behavior
+     * --------------------------------------------------------- */
+    if (DEVICE_DISCOVERY_eGetDeviceRole() == DEVICE_ROLE_PRIMARY)
+    {
+        NEIGHBOR_vAddOrUpdate(tBeacon.u32DeviceId,
+                              tBeacon.u8HopCount,
+                              tBeacon.i16Rssi,
+                              tBeacon.u16BatMv);
+
         tLastBeaconHeardTick = xTaskGetTickCount();
         return;
     }
 
-    /* first time see this beacon id: add to ring and forward */
-    FORWARD_vAdd(tBeacon.u32BeaconMsgId);
-    (void)TX_bSendRaw(pBuf, u32Len);
+    /* ---------------------------------------------------------
+     * 4. SECONDARY behavior (forward exactly once)
+     * --------------------------------------------------------- */
+    tBeacon.u8HopCount++;
 
-    /* add neighbor if we are primary (DEVICE_DISCOVERY app sets role) */
-    if (DEVICE_DISCOVERY_eGetDeviceRole() == DEVICE_ROLE_PRIMARY) {
-        NEIGHBOR_vAddOrUpdate(tBeacon.u32DeviceId, tBeacon.u8HopCount, tBeacon.i16Rssi, tBeacon.u16BatMv);
+    uint8_t u8Buf[64];
+    size_t u32TempLen = 0;
+
+    if (!ENCODE_bDBeacon(&tBeacon, u8Buf, sizeof(u8Buf), &u32TempLen))
+    {
+        return;
     }
 
-    tLastBeaconHeardTick = xTaskGetTickCount();
+    MESHNETWORK_bSendPktJittered(u8Buf, u32TempLen);
+    DBG("MeshNetwork: Forwarding Beacon\r\n");
 }
+
+
 
 static void MESHNETWORK_vHandleDAck(const uint8_t *pBuf, size_t u32Len, int16_t s16Rssi) {
     if (u32Len < 14) return;
@@ -343,22 +455,22 @@ static void MESHNETWORK_vHandleDAck(const uint8_t *pBuf, size_t u32Len, int16_t 
     uint32_t u32Ids[MESH_MAX_ACK_IDS_PER_PACKET];
     for (uint8_t i=0;i<u8AckCount;i++) u32Ids[i] = read_u32_be(&pBuf[14 + 4*i]);
 
-    DBG("RX DAck: ackId=%08X dreq=%08X sender=%08X count=%u", u32AckMsgId, u32DreqId, u32SenderId, u8AckCount);
+    DBG("MeshNetwork: DAck Received: ackId=%08X dreq=%08X sender=%04X count=%u\r\n", u32AckMsgId, u32DreqId, u32SenderId, u8AckCount);
 
-    if (FORWARD_bHasSeen(u32AckMsgId)) return;
+    if (FORWARD_bHasSeen(u32AckMsgId))
+    {
+    	DBG("MeshNetwork: Ack seen before\r\n");
+    	return;
+    }
     FORWARD_vAdd(u32AckMsgId);
-    (void)TX_bSendRaw(pBuf, u32Len);
+    MESHNETWORK_bSendPktJittered(pBuf, u32Len);
+    DBG("MeshNetwork: Ack forwarded\r\n");
 
     /* if beaconing node and my id is included -> stop beaconing and become forwarder */
     uint32_t u32MyId = LORARADIO_u32GetUniqueId();
     for (uint8_t i=0;i<u8AckCount;i++) {
         if (u32Ids[i] == u32MyId) {
-            if (bNodeBeaconing && u32NodeBeaconDreqId == u32DreqId) {
-                bNodeBeaconing = false; u32NodeBeaconDreqId = 0;
-                xTimerStop(xBeaconTimer, 0);
-                eNodeRole = NODE_ROLE_FORWARDER;
-                DBG("Node %08X: received DAck -> become forwarder", u32MyId);
-            }
+        	MESHNETWORK_vStopBeaconing(u32DreqId);
             break;
         }
     }
@@ -369,22 +481,39 @@ static void MESHNETWORK_vHandleTimeSync(const uint8_t *pBuf, size_t u32Len, int1
     uint32_t u32Utc = read_u32_be(&pBuf[1]);
     WakeupInterval tInterval = (WakeupInterval)pBuf[5];
 
-    DBG("RX TimeSync: utc=%u interval=%u", u32Utc, tInterval);
+    DBG("MeshNetwork: TimeSync received: utc=%u interval=%u\r\n", u32Utc, tInterval);
 
-    MESHNETWORK_vUpdatePrimaryLastSeen();
-
-    if (FORWARD_bHasSeen(u32Utc)) return;
+    if (FORWARD_bHasSeen(u32Utc))
+	{
+    	DBG("MeshNetwork: TimeSync seen before\r\n");
+    	return;
+	}
     FORWARD_vAdd(u32Utc);
 
-    (void)TX_bSendRaw(pBuf, u32Len);
+    MESHNETWORK_bSendPktJittered(pBuf, u32Len);
+    DBG("MeshNetwork: TimeSync forwarded\r\n");
 
     /* adopt time if newer */
     uint64_t u64Now = RTC_u64GetUTC();
     if ((uint64_t)u32Utc > u64Now) {
         RTC_vSetUTC(u32Utc);
         MESHNETWORK_vSetWakeupInterval(tInterval);
-        DBG("Applied TimeSync: %u interval=%u", u32Utc, tInterval);
+        MESHNETWORK_vUpdatePrimaryLastSeen();
+        DBG("MeshNetwork: TimeSync applied: %u interval=%u\r\n", u32Utc, tInterval);
     }
+
+    /* Notify DeviceDiscovery that discovery is complete */
+    TaskHandle_t xAppTask = DEVICE_DISCOVERY_xGetTaskHandle();
+    if (xAppTask != NULL)
+    {
+        xTaskNotify(
+            xAppTask,
+            DEVICE_DISCOVERY_NOTIFY_TIMESYNC,
+            eSetBits
+        );
+    }
+
+
 }
 
 /* ------------------------------------------------------------------ */
@@ -401,7 +530,7 @@ void MESHNETWORK_vParserTask(void *pvParameters) {
             case MeshPktType_DBeacon: MESHNETWORK_vHandleDBeacon(tRx.buffer, tRx.length, tRx.rssi); break;
             case MeshPktType_DAck: MESHNETWORK_vHandleDAck(tRx.buffer, tRx.length, tRx.rssi); break;
             case MeshPktType_TimeSync: MESHNETWORK_vHandleTimeSync(tRx.buffer, tRx.length, tRx.rssi); break;
-            default: DBG("Unknown mesh pkt type %u", tRx.buffer[0]); break;
+            default: DBG("MeshNetwork: Unknown mesh pkt type %u\r\n", tRx.buffer[0]); break;
         }
     }
 }
@@ -432,10 +561,22 @@ void MESHNETWORK_vInit(void) {
     xPrimaryAckTimer = xTimerCreate(
     		"AckT",
 			pdMS_TO_TICKS(MESH_PRIMARY_ACK_INTERVAL_MS_CFG),
-			pdFALSE,
+			pdTRUE,
 			NULL,
 			MESHNETWORK_vPrimaryAckTimerCallback);
     configASSERT(xPrimaryAckTimer != NULL);
+
+    xJitterTxTimer = xTimerCreate(
+			"JitTX",
+			pdMS_TO_TICKS(MESH_TX_JITTER_MIN_MS),
+			pdFALSE, /* one-shot */
+			NULL,
+			MESHNETWORK_vJitterTxTimerCb
+    );
+    configASSERT(xJitterTxTimer != NULL);
+
+    tJitterTx.bPending = false;
+
 
     BaseType_t xRes = xTaskCreate(
     		MESHNETWORK_vParserTask,
@@ -446,7 +587,7 @@ void MESHNETWORK_vInit(void) {
 			&xParserTaskHandle);
     configASSERT(xRes == pdPASS);
 
-    DBG("MeshNetwork initialized");
+    DBG("MeshNetwork initialized\r\n");
 }
 
 uint32_t MESHNETWORK_u32GenerateGlobalMsgID(void) {
@@ -474,14 +615,14 @@ bool MESHNETWORK_bStartDiscoveryRound(uint32_t u32DreqId)
         return false;
     }
 
-    if (!TX_bSendRaw(u8Out, u32Len)) {
+    if (!MESHNETWORK_bSendPktJittered(u8Out, u32Len)) {
         return false;
     }
 
     /* Schedule immediate ACK attempt */
-    MESHNETWORK_vKickPrimaryAck();
+    MESHNETWORK_vStartPrimaryAck();
 
-    DBG("Primary sent DReq %08X\r\n", u32DreqId);
+    DBG("MeshNetwork: DReq %08X sent from primary\r\n", u32DreqId);
 
     return true;
 }
@@ -503,7 +644,7 @@ void MESHNETWORK_vSendTimeSync(uint32_t u32UtcTimestamp,
 
     /* prevent re-forwarding our own TS */
     FORWARD_vAdd(u32UtcTimestamp);
-
+    /* We do not jitter TimeSync sent from the primary */
     TX_bSendRaw(u8Buf, u32Len);
 
     DBG("MeshNetwork: TimeSync sent %u interval=%u\r\n",
@@ -512,24 +653,24 @@ void MESHNETWORK_vSendTimeSync(uint32_t u32UtcTimestamp,
 
 
 
-void MESHNETWORK_vStartBeaconing(uint32_t u32DreqId, uint8_t u8HopCount) {
+static void MESHNETWORK_vStartBeaconing(uint32_t u32DreqId, uint8_t u8HopCount) {
     if (bNodeBeaconing && u32NodeBeaconDreqId == u32DreqId) return;
     bNodeBeaconing = true;
     u32NodeBeaconDreqId = u32DreqId;
     u8NodeHopCount = u8HopCount;
     eNodeRole = NODE_ROLE_BEACONING;
     xTimerStart(xBeaconTimer, 0);
-    DBG("Start beaconing for dreq %08X", u32DreqId);
+    DBG("MeshNetwork: Start beaconing for dreq %08X\r\n", u32DreqId);
 }
 
-void MESHNETWORK_vStopBeaconing(uint32_t u32DreqId) {
+static void MESHNETWORK_vStopBeaconing(uint32_t u32DreqId) {
     if (!bNodeBeaconing) return;
     if (u32NodeBeaconDreqId != u32DreqId) return;
     bNodeBeaconing = false;
     u32NodeBeaconDreqId = 0;
     xTimerStop(xBeaconTimer, 0);
     eNodeRole = NODE_ROLE_FORWARDER;
-    DBG("Stop beaconing, become forwarder");
+    DBG("MeshNetwork: Stop beaconing, become forwarder\r\n");
 }
 
 bool MESHNETWORK_bGetDiscoveredNeighbors(MeshDiscoveredNeighbor_t *pBuffer, uint16_t u16MaxEntries, uint16_t *pu16ActualEntries) {
@@ -571,7 +712,7 @@ uint8_t MESHNETWORK_u8GetWakeupInterval(void)
 
 TickType_t MESHNETWORK_tGetLastBeaconHeardTick(void)
 {
-return tLastBeaconHeardTick;
+	return tLastBeaconHeardTick;
 }
 
 void MESHNETWORK_vUpdatePrimaryLastSeen(void)
@@ -584,11 +725,23 @@ uint64_t MESHNETWORK_u64GetLastPrimaryHeardTick(void)
     return u64LastPrimaryHeardTick;
 }
 
-void MESHNETWORK_vKickPrimaryAck(void)
+void MESHNETWORK_vStartPrimaryAck(void)
 {
     if (xPrimaryAckTimer != NULL) {
         xTimerStart(xPrimaryAckTimer, 0);
     }
+}
+
+void MESHNETWORK_vStopPrimaryAck(void)
+{
+    if (xPrimaryAckTimer != NULL) {
+        xTimerStop(xPrimaryAckTimer, 0);
+    }
+}
+
+void MESHNETWORK_vResetNodeRole(void)
+{
+	eNodeRole = NODE_ROLE_UNKNOWN;
 }
 
 

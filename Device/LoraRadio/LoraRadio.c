@@ -299,7 +299,7 @@ bool LORARADIO_bCarrierSenseAndWait(uint32_t maxWaitMs)
         }
 
         // Channel busy, apply random backoff
-        uint16_t backoffMs = 200 + (rand() % 400); // random 200–600 ms
+        uint16_t backoffMs = 100 + (rand() % 300); // random 200–600 ms
         DBG("CAD busy, retrying after %d ms\r\n", backoffMs);
         vTaskDelay(pdMS_TO_TICKS(backoffMs));
     }

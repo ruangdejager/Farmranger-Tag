@@ -18,10 +18,13 @@
 
 
 #define MESH_BEACON_INTERVAL_MS            5000U
-#define MESH_PRIMARY_ACK_INTERVAL_MS       3000U
-#define MESH_DISCOVERY_IDLE_MS             5000U
+#define MESH_PRIMARY_ACK_INTERVAL_MS       4000U
+#define MESH_DISCOVERY_IDLE_MS             10000U
 #define FORWARD_RING_SIZE                  32
 #define MESH_MAX_NEIGHBORS                 128
+
+#define MESH_TX_JITTER_MIN_MS   		   20U
+#define MESH_TX_JITTER_MAX_MS   		   300U
 
 
 /* ------------------------------------------------------------------ */
@@ -128,10 +131,6 @@ bool MESHNETWORK_bStartDiscoveryRound(uint32_t u32DreqId);
 void MESHNETWORK_vSendTimeSync(uint32_t u32UtcTimestamp,
                                WakeupInterval tWakeupInterval);
 
-/* Local node controls */
-void MESHNETWORK_vStartBeaconing(uint32_t u32DreqId, uint8_t u8HopCount);
-void MESHNETWORK_vStopBeaconing(uint32_t u32DreqId);
-
 /* Access neighbor table (primary) */
 bool MESHNETWORK_bGetDiscoveredNeighbors(MeshDiscoveredNeighbor_t *pBuffer, uint16_t u16MaxEntries, uint16_t *pu16ActualEntries);
 void MESHNETWORK_vClearDiscoveredNeighbors(void);
@@ -150,7 +149,10 @@ TickType_t MESHNETWORK_tGetLastBeaconHeardTick(void);
 uint64_t MESHNETWORK_u64GetLastPrimaryHeardTick(void);
 void MESHNETWORK_vUpdatePrimaryLastSeen(void);
 
-void MESHNETWORK_vKickPrimaryAck(void);
+void MESHNETWORK_vStartPrimaryAck(void);
+void MESHNETWORK_vStopPrimaryAck(void);
+
+void MESHNETWORK_vResetNodeRole(void);
 
 
 #endif /* WORKER_MESHNETWORK_MESHNETWORK_H_ */
