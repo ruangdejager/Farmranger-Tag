@@ -306,7 +306,7 @@ static void MESHNETWORK_vBeaconTimerCallback(TimerHandle_t xTimer) {
     uint8_t u8Buf[64]; size_t u32Len=0;
     if (!ENCODE_bDBeacon(&tBeacon, u8Buf, sizeof(u8Buf), &u32Len)) return;
     FORWARD_vAdd(tBeacon.u32BeaconMsgId); /* avoid forwarding own beacon */
-    MESHNETWORK_bSendPktJittered(u8Buf, u32Len);;
+    MESHNETWORK_bSendPktJittered(u8Buf, u32Len);
 }
 
 static void MESHNETWORK_vPrimaryAckTimerCallback(TimerHandle_t xTimer) {
@@ -463,8 +463,6 @@ static void MESHNETWORK_vHandleDAck(const uint8_t *pBuf, size_t u32Len, int16_t 
     	return;
     }
     FORWARD_vAdd(u32AckMsgId);
-    MESHNETWORK_bSendPktJittered(pBuf, u32Len);
-    DBG("MeshNetwork: Ack forwarded\r\n");
 
     /* if beaconing node and my id is included -> stop beaconing and become forwarder */
     uint32_t u32MyId = LORARADIO_u32GetUniqueId();
@@ -474,6 +472,10 @@ static void MESHNETWORK_vHandleDAck(const uint8_t *pBuf, size_t u32Len, int16_t 
             break;
         }
     }
+
+    MESHNETWORK_bSendPktJittered(pBuf, u32Len);
+    DBG("MeshNetwork: Ack forwarded\r\n");
+
 }
 
 static void MESHNETWORK_vHandleTimeSync(const uint8_t *pBuf, size_t u32Len, int16_t s16Rssi) {
@@ -741,6 +743,9 @@ void MESHNETWORK_vStopPrimaryAck(void)
 
 void MESHNETWORK_vResetNodeRole(void)
 {
+    bNodeBeaconing = false;
+    u32NodeBeaconDreqId = 0;
+    xTimerStop(xBeaconTimer, 0);
 	eNodeRole = NODE_ROLE_UNKNOWN;
 }
 

@@ -257,9 +257,9 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 		}
 		else
 		{
-			// Secondary nodes just chill after rounds
+			/* Secondary nodes just chill after rounds */
 			vTaskDelay(pdMS_TO_TICKS(5000));
-
+			/* Reset the node role for the next discovery round */
 			MESHNETWORK_vResetNodeRole();
 		}
 
