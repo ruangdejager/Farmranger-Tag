@@ -69,7 +69,16 @@ void LORARADIO_vInit(void) {
     configASSERT(status == pdPASS);
 
     LORARADIO_DRIVER_vInit(u8DevEUI); // Initialize LoRa hardware
+
     LORARADIO_DRIVER_vEnterRxMode(0x00); // Start listening
+
+    /* Here is code to test tx output power - comment out mesh and discovery inits */
+//    -------------------------------------------------------------------------------------
+//	SUBGRF_SetSwitch(RFO_LP, RFSWITCH_TX);
+//	// Workaround 5.1 in DS.SX1261-2.W.APP (before each packet transmission)
+//	SUBGRF_WriteRegister(0x0889, (SUBGRF_ReadRegister(0x0889) | 0x04));
+//    SUBGRF_SetTxContinuousWave();
+//    -------------------------------------------------------------------------------------
 
     DBG("\r\nDevice ID: %X\r\n", LORARADIO_u32GetUniqueId());
 
