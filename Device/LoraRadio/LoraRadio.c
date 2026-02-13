@@ -24,6 +24,10 @@
 #define CAD_CLEAR_BIT   		(1 << 0)
 #define CAD_BUSY_BIT    		(1 << 1)
 
+#define CAD_BASE_BACKOFF_MS     100
+#define CAD_MAX_BACKOFF_MS      2000
+#define CAD_MAX_EXPONENT        4
+
 
 // --- PRIVATE FREE_RTOS QUEUES ---
 static QueueHandle_t xLoRaTxQueue; // Queue for packets to be sent by LoraRadio_send_packet
@@ -298,24 +302,43 @@ bool LORARADIO_bCarrierSense(void)
 bool LORARADIO_bCarrierSenseAndWait(uint32_t maxWaitMs)
 {
     uint32_t startTick = xTaskGetTickCount();
+    uint32_t failCount = 0;
 
     while ((xTaskGetTickCount() - startTick) < pdMS_TO_TICKS(maxWaitMs))
     {
         if (LORARADIO_bCarrierSense())
         {
-        	DBG("Channel clear\r\n");
-            return true; // Channel clear, proceed
+            return true;    // SUCCESS → reset behavior implicitly
         }
 
-        // Channel busy, apply random backoff
-        uint16_t backoffMs = 100 + (rand() % 300); // random 200–600 ms
-        DBG("CAD busy, retrying after %d ms\r\n", backoffMs);
+        /* ---- Adaptive backoff ---- */
+
+        uint32_t exponent = (failCount > CAD_MAX_EXPONENT)
+                            ? CAD_MAX_EXPONENT
+                            : failCount;
+
+        uint32_t window = CAD_BASE_BACKOFF_MS << exponent;
+
+        if (window > CAD_MAX_BACKOFF_MS)
+            window = CAD_MAX_BACKOFF_MS;
+
+        uint32_t backoffMs =
+            CAD_BASE_BACKOFF_MS +
+            (LORARADIO_u32GetRandomNumber(window - CAD_BASE_BACKOFF_MS + 1));
+
+        DBG("CAD: Adaptive backoff %lu ms (fail=%lu)\r\n",
+            backoffMs,
+            failCount);
+
         vTaskDelay(pdMS_TO_TICKS(backoffMs));
+
+        failCount++;
     }
 
-    DBG("Carrier sense timed out after %lu ms\r\n", maxWaitMs);
-    return false; // Timeout reached
+    DBG("CAD: Carrier sense timed out after %lu ms\r\n", maxWaitMs);
+    return false;
 }
+
 
 void LORARADIO_vEnterDeepSleep(void)
 {
