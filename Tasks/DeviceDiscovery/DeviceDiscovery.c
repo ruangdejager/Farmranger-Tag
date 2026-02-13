@@ -22,7 +22,7 @@
 #define APP_TASK_PRIORITY       	(configMAX_PRIORITIES - 3) // Lower priority for app logic
 #define APP_TASK_STACK_SIZE     	(configMINIMAL_STACK_SIZE * 10)
 
-#define LOST_PRIMARY_TIMEOUT_MIN    40      // ~24 hours
+#define LOST_PRIMARY_TIMEOUT_MIN    40      // ~8 hours
 
 // --- PRIVATE FREE_RTOS RESOURCES ---
 static EventGroupHandle_t xDiscoveryEventGroup;
@@ -52,11 +52,12 @@ void DEVICE_DISCOVERY_vInit(void) {
                 &xDeviceDiscoveryTaskHandle);
     configASSERT(status == pdPASS);
 
-    eDeviceRole = (DeviceRole_e)HAL_GPIO_ReadPin(BSP_VERSION_BIT0_PORT, BSP_VERSION_BIT0_PIN);
+    eDeviceRole = HAL_GPIO_ReadPin(BSP_VERSION_BIT0_PORT, BSP_VERSION_BIT0_PIN) ? DEVICE_ROLE_PRIMARY : DEVICE_ROLE_SECONDARY ;
+
     HAL_GPIO_DeInit(BSP_VERSION_BIT0_PORT, BSP_VERSION_BIT0_PIN);
 
     DBG("DeviceDiscovery: Initialized FreeRTOS resources and created DeviceDiscoveryAppTask.\r\n");
-    if (eDeviceRole)
+    if (eDeviceRole == DEVICE_ROLE_PRIMARY)
     {
     	DBG("DeviceDiscovery: Device Role = PRIMARY\r\n");
     } else {
@@ -104,7 +105,6 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 
 				MESHNETWORK_bStartDiscoveryRound(u32DreqId);
 
-				TickType_t tWaveStartTick = xTaskGetTickCount();
 				TickType_t tLastBeaconTick = MESHNETWORK_tGetLastBeaconHeardTick();
 
 				/* ---- Monitor beacon activity for this wave ---- */
@@ -150,6 +150,7 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 			// Wait for this round's window to complete
 		    uint32_t ulNotifyValue = 0;
 
+		    xTaskNotifyStateClear(NULL);   // clear pending state
 		    /* Block until TimeSync arrives */
 		    BaseType_t notified = xTaskNotifyWait(
 		        0,                              /* don't clear on entry */
@@ -259,8 +260,6 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 		{
 			/* Secondary nodes just chill after rounds */
 			vTaskDelay(pdMS_TO_TICKS(5000));
-			/* Reset the node role for the next discovery round */
-			MESHNETWORK_vResetNodeRole();
 		}
 
 		// ---------------------------------------------------------------------
@@ -269,22 +268,23 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 		uint64_t now = HAL_RTC_u64GetValue();
 		uint64_t last_heard = MESHNETWORK_u64GetLastPrimaryHeardTick();
 
-		// ---- A: Enter Recovery Mode ----
-		if (eDeviceRole == DEVICE_ROLE_SECONDARY &&
-		    (now - last_heard) > LOST_PRIMARY_TIMEOUT_MIN*60)
+		/* ---- Enter Recovery Mode ---- */
+		if ( (eDeviceRole == DEVICE_ROLE_SECONDARY) &&
+		    ((now - last_heard) > LOST_PRIMARY_TIMEOUT_MIN*60) )
 		{
-		    DBG("DeviceDiscovery: Node %X: ENTERING RECOVERY MODE.\r\n", LORARADIO_u32GetUniqueId());
+		    DBG("DeviceDiscovery: ENTERING RECOVERY MODE.\r\n", LORARADIO_u32GetUniqueId());
 		    DEVICE_DISCOVERY_vRecoveryMode();
 		}
-		// ---- B: Deep sleep normally ----
-		else
-		{
-			DBG("DeviceDiscovery: Waiting for synchronized wake-up...\r\n");
-			vTaskDelay(pdMS_TO_TICKS(100));
-		    LORARADIO_vEnterDeepSleep();
-		    SYSTEM_vActivateDeepSleep();
-		}
 
+		/* ---- Deep sleep normally ---- */
+		vTaskDelay(pdMS_TO_TICKS(5000));
+		/* Reset the node role for the next discovery round */
+		MESHNETWORK_vResetNodeRole();
+		DBG("DeviceDiscovery: Waiting for synchronized wake-up...\r\n");
+		vTaskDelay(pdMS_TO_TICKS(100));
+		/* Turn off radio and deep sleep... zzz... */
+		LORARADIO_vEnterDeepSleep();
+		SYSTEM_vActivateDeepSleep();
 
 	}
 }
@@ -334,8 +334,8 @@ DeviceRole_e DEVICE_DISCOVERY_eGetDeviceRole(void)
 // ======================================================================
 static void DEVICE_DISCOVERY_vRecoveryMode(void)
 {
-    DBG("DeviceDiscovery: RecoveryMode: Node %X LISTENING for primary.\r\n",
-        LORARADIO_u32GetUniqueId());
+
+    DBG("DeviceDiscovery: Node %X recovery; LISTENING FOR PRIMARY.\r\n", LORARADIO_u32GetUniqueId());
 
     for (uint8_t i = 0; i < 120*60; i++)
     {
@@ -346,18 +346,14 @@ static void DEVICE_DISCOVERY_vRecoveryMode(void)
         if (last_heard != 0 &&
             (HAL_RTC_u64GetValue() - last_heard) < LOST_PRIMARY_TIMEOUT_MIN*60)
         {
-            DBG("DeviceDiscovery: RecoveryMode: Primary detected. Exiting recovery.\r\n");
+        	DBG("DeviceDiscovery: Node %X recovered; PRIMARY FOUND.\r\n", LORARADIO_u32GetUniqueId());
             return;
         }
     }
 
-    DBG("DeviceDiscovery: RecoveryMode: No primary found.\r\n");
-#warning Should we reset last seen here?
+    DBG("DeviceDiscovery: Node %X not recovered; NO PRIMARY FOUND.\r\n", LORARADIO_u32GetUniqueId());
+    /* We reset last seen even though we didn't see to let the device sleep before trying another recovery */
     MESHNETWORK_vUpdatePrimaryLastSeen();
-
-    // ---- B / common: Deep sleep after this cycle ----
-//    LORARADIO_vEnterDeepSleep();
-//    SYSTEM_vActivateDeepSleep();
 
 }
 
