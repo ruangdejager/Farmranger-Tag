@@ -22,7 +22,7 @@
 #define APP_TASK_PRIORITY       	(configMAX_PRIORITIES - 3) // Lower priority for app logic
 #define APP_TASK_STACK_SIZE     	(configMINIMAL_STACK_SIZE * 10)
 
-#define LOST_PRIMARY_TIMEOUT_MIN    40      // ~8 hours
+#define LOST_PRIMARY_TIMEOUT_MIN    120      // ~8 hours
 
 // --- PRIVATE FREE_RTOS RESOURCES ---
 static EventGroupHandle_t xDiscoveryEventGroup;
