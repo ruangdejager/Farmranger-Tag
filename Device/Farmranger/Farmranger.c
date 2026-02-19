@@ -397,7 +397,7 @@ bool FARMRANGER_bLogData(MeshDiscoveredNeighbor_t *neighbors, uint16_t count)
                                (uint8_t*)logBuffer,
     						   pos);
         /* Wait until TX fully drained */
-        if (xSemaphoreTake(xUartTxDoneSem, pdMS_TO_TICKS(2000)) != pdTRUE)
+        if (xSemaphoreTake(xUartTxDoneSem, pdMS_TO_TICKS(3000)) != pdTRUE)
         {
             DBG("UART TX timeout\r\n");
             return false;

@@ -150,6 +150,9 @@ void MPPTCHG_vPgStateTask(void *pvParameters)
 {
     (void)pvParameters;
 
+	PLATFORM_bSubscribeToHeartbeat(xTaskGetCurrentTaskHandle(),
+                        HB_ALLOW_IN_RECOVERY);
+
     bool bChgPgChange;
     bool bWasSleepActive = false;
 
@@ -223,6 +226,9 @@ void MPPTCHG_vMpptTask(void *pvParameters)
 
     (void)pvParameters;
 
+	PLATFORM_bSubscribeToHeartbeat(xTaskGetCurrentTaskHandle(),
+                        HB_ALLOW_IN_RECOVERY);
+
     for (;;)
     {
 
@@ -236,6 +242,9 @@ void MPPTCHG_vMpptTask(void *pvParameters)
             NULL,// Where the value is stored
             portMAX_DELAY
         );
+
+		// Increment mppt state counters
+		MPPTCHG_vIncMpptStateCounters();
 
         if (TIMERS_bTimerIsExpired(&tMpptTmr))
         {
