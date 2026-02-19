@@ -10,7 +10,7 @@
 #include "Farmranger.h"
 #include "FreeRTOS.h"
 #include "task.h"
-#include "event_groups.h"
+
 #include <stdio.h> // For DBG (debugging)
 #include <stdlib.h> // For srand
 
@@ -18,6 +18,7 @@
 #include "platform_rtc.h"
 #include "hal_rtc.h"
 #include "platform.h"
+#include "Power.h"
 
 // --- PRIVATE DEFINES ---
 #define APP_TASK_PRIORITY       	(configMAX_PRIORITIES - 3) // Lower priority for app logic
@@ -293,6 +294,12 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 		/* Turn off radio and deep sleep... zzz... */
 		LORARADIO_vEnterDeepSleep();
 		SYSTEM_vActivateDeepSleep();
+
+		/* If power class is in recovery mode we halt the discovery app */
+		if (DEVICE_DISCOVERY_eGetDeviceRole() == DEVICE_ROLE_SECONDARY)
+		{
+			POWER_vWaitForClass(POWER_CLASS_NORMAL);
+		}
 
 	}
 }

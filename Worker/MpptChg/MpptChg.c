@@ -11,6 +11,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "timers.h"
+#include "platform.h"
 
 #include "hard_timers.h"
 #include "dbg_log.h"
