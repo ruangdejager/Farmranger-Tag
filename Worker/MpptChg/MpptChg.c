@@ -50,9 +50,9 @@ volatile bool bChgPgChangeFlag;
 // The state of charge when in mppt mode
 chg_mppt_state_t tMpptState;
 
-TIMERS_timer_t tMpptTmr;
-TIMERS_timer_t tCheckPGIntervalTmr;
-TIMERS_timer_t tMpptOffCountdownTmr;
+uint8_t u8MpptTmrCnt = 0;
+uint8_t u8CheckPGIntervalTmrCnt = 0;
+uint16_t u16MpptOffCountdownTmrCnt = 0;
 
 void MPPTCHG_vPgStateTask(void *pvParameters);
 void MPPTCHG_vMpptTask(void *pvParameters);
@@ -82,34 +82,7 @@ void MPPTCHG_vPinChangeCallback(void)
  */
 void MPPTCHG_vInit(void)
 {
-	/* Create timers with dummy period (1 second).
-	   We set real period on start. Auto-reload = pdFALSE. */
 
-	/*
-	tMpptTmr = xTimerCreate("MPPTtmr",
-							pdMS_TO_TICKS(1000),
-							pdFALSE,
-							(void *)&bMpptTmrExpired,
-							MPPTCHG_vGenericTimerCallback);
-	configASSERT(tMpptTmr != NULL);
-
-	tCheckPGIntervalTmr = xTimerCreate("CheckPGtmr",
-									   pdMS_TO_TICKS(1000),
-									   pdFALSE,
-									   (void *)&bCheckPGIntervalTmrExpired,
-									   MPPTCHG_vGenericTimerCallback);
-	configASSERT(tCheckPGIntervalTmr != NULL);
-	*/
-
-//    TIMERS_vTimerCreate(&tMpptTmr, TIMER_RTC_TICK);
-//    TIMERS_vTimerStart(&tMpptTmr, 0);
-//
-//    TIMERS_vTimerCreate(&tCheckPGIntervalTmr, TIMER_RTC_TICK);
-//    TIMERS_vTimerStart(&tCheckPGIntervalTmr, 0);
-//
-//	TIMERS_vTimerCreate(&tMpptOffCountdownTmr, TIMER_RTC_TICK);
-//	TIMERS_vTimerStart(&tMpptOffCountdownTmr, 30);
-//
 //    BaseType_t status;
 //    status = xTaskCreate(MPPTCHG_vPgStateTask,
 //                "PgStateTask",
@@ -127,7 +100,6 @@ void MPPTCHG_vInit(void)
 //				&MPPTCHG_vMpptTask_handle);
 //    configASSERT(status == pdPASS);
 //
-//
 //	// Interrupt set up by HAL, just register callback
 //	MPPTCHG_DRIVER_vRegisterCallback(MPPTCHG_vPinChangeCallback);
 //
@@ -136,14 +108,11 @@ void MPPTCHG_vInit(void)
 //	// Don't init PG interrupt here
 //	PgState = CHG_PG_STATE_UNKNOWN;
 //	MPPTCHG_DRIVER_vInitGpio();
-//
-//	tMpptState = CHG_SEL_MPPT_5mA;
-//	MPPTCHG_DRIVER_vSetMppt5mA();
-//
-//	MPPTCHG_vClearMpptStateCounters();
 
-		tMpptState = CHG_SEL_MPPT_20mA;
-		MPPTCHG_DRIVER_vSetMppt20mA();
+	tMpptState = CHG_SEL_MPPT_20mA;
+	MPPTCHG_DRIVER_vSetMppt20mA();
+
+//	MPPTCHG_vClearMpptStateCounters();
 
 }
 
@@ -156,6 +125,7 @@ void MPPTCHG_vPgStateTask(void *pvParameters)
 
     bool bChgPgChange;
     bool bWasSleepActive = false;
+    uint8_t u8TmrCnt = 0;
 
     for (;;)
     {
@@ -164,24 +134,25 @@ void MPPTCHG_vPgStateTask(void *pvParameters)
     	// Here we make sure to check PG lines every 60s when not initialized
 		while (1)
 		{
-			if ( bChgPgChangeFlag || (PgState == CHG_PG_STATE_UNSTABLE) ) break;
-			// Incase we are stuck with power good
-			#warning We need to change to hardware timers, software timers like this is pause when device goes to sleep
-			if ( TIMERS_bTimerIsExpired(&tCheckPGIntervalTmr) )
-			{
-//				MPPTCHG_vStartTimerSeconds(tCheckPGIntervalTmr, 60);
-				TIMERS_vTimerStart(&tCheckPGIntervalTmr, 30);
-				break;
-			}
 
-	        // Wait 1s notification from PLATFORM module bliptask
-			// Todo: Use events for 1s actions in the future
+	        // 1Hz heartbeat
 	        xTaskNotifyWait(
 	            0x00,            // Don't clear bits on entry
 	            ULONG_MAX,       // Clear all bits on exit
 	            NULL,// Where the value is stored
 	            portMAX_DELAY
 	        );
+
+			if ( bChgPgChangeFlag || (PgState == CHG_PG_STATE_UNSTABLE) ) break;
+
+			// Incase we are stuck with power good
+			if ( u8TmrCnt % 30 == 0 )
+			{
+				u8TmrCnt = 0;
+				break;
+			}
+			// Increment after aboove check!
+			u8TmrCnt++;
 
 		}
 
@@ -234,9 +205,7 @@ void MPPTCHG_vMpptTask(void *pvParameters)
     {
 
 		// Frequency of executing mppt switching
-//		vTaskDelay(pdMS_TO_TICKS(2000));
-        // Wait 1s notification from PLATFORM module bliptask
-		// Todo: Use events for 1s actions in the future
+        // 1Hz Heartbeat
         xTaskNotifyWait(
             0x00,            // Don't clear bits on entry
             ULONG_MAX,       // Clear all bits on exit
@@ -247,8 +216,8 @@ void MPPTCHG_vMpptTask(void *pvParameters)
 		// Increment mppt state counters
 		MPPTCHG_vIncMpptStateCounters();
 
-        if (TIMERS_bTimerIsExpired(&tMpptTmr))
-        {
+		if ( u8MpptTmrCnt % 3 == 0 )
+		{
 
 			if ( (PgState == CHG_PG_STATE_HIGH) || (PgState == CHG_PG_STATE_UNSTABLE) )
 			{
@@ -260,7 +229,7 @@ void MPPTCHG_vMpptTask(void *pvParameters)
 				// When mppt state has been at CHG_SEL_MPPT_20mA for 5 minutes and Power is NOT GOOD -> Enter OFF state
 				if (tMpptState != CHG_SEL_MPPT_5mA)
 				{
-					TIMERS_vTimerStart(&tMpptOffCountdownTmr, 15);
+					u16MpptOffCountdownTmrCnt = 0;
 				}
 
 			} else if (PgState == CHG_PG_STATE_LOW) {
@@ -268,9 +237,12 @@ void MPPTCHG_vMpptTask(void *pvParameters)
 				MPPTCHG_vUpdateMpptState(CHG_BUMP_MPPT_UP);
 			}
 
-			TIMERS_vTimerStart(&tMpptTmr, 2);
+			u8MpptTmrCnt = 0;
 
-        }
+		}
+		// Increment after aboove check!
+		u8MpptTmrCnt++;
+		u16MpptOffCountdownTmrCnt++;
 
     }
 
@@ -289,11 +261,11 @@ void MPPTCHG_vUpdateMpptState(chg_mppt_bump_t tMpptBump)
 				MPPTCHG_DRIVER_vInitGpio();
 				// Forces a check on PG
 				PgState = CHG_PG_STATE_UNSTABLE;
-				TIMERS_vTimerStart(&tMpptOffCountdownTmr, 30);
+				u16MpptOffCountdownTmrCnt = 270;
 			}
 			break;
 		case CHG_SEL_MPPT_5mA:
-			if (tMpptBump == CHG_BUMP_MPPT_DOWN && TIMERS_bTimerIsExpired(&tMpptOffCountdownTmr))
+			if (tMpptBump == CHG_BUMP_MPPT_DOWN && (u16MpptOffCountdownTmrCnt == 300) )
 			{
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_OFF);
 				// De-Init the PG line
