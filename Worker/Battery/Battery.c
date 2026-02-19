@@ -35,7 +35,7 @@
 
 TaskHandle_t BAT_vSampleTask_handle;
 TaskHandle_t BAT_vBufferPurgeTask_handle;
-TaskHandle_t BAT_vCheckSampleCheduleTask_handle;
+TaskHandle_t BAT_vCheckSampleScheduleTask_handle;
 
 //! Averaging buffer and idx
 uint16_t au16BatAvgBuf[BAT_AVG_FACTOR];
@@ -43,18 +43,13 @@ uint8_t u8BatAvgIdx;
 //! Variable to store previous sample for delta limiting
 uint16_t u16BatPreviousSample;
 
-static TIMERS_timer_t tBatSampleIntervalTmr;
-
 //Function definition
 void BAT_vSampleTask(void *pvParameters);
 void BAT_vBufferPurgeTask(void *pvParameters);
-void BAT_vCheckSampleCheduleTask(void *pvParameters);
+void BAT_vCheckSampleScheduleTask(void *pvParameters);
 
 void BAT_vInit(void)
 {
-
-    TIMERS_vTimerCreate(&tBatSampleIntervalTmr, TIMER_RTC_TICK);
-    TIMERS_vTimerStart(&tBatSampleIntervalTmr, BAT_SAMPLE_INTERVAL);
 
     BaseType_t status;
 
@@ -66,12 +61,12 @@ void BAT_vInit(void)
 				&BAT_vSampleTask_handle);
     configASSERT(status == pdPASS);
 
-    status = xTaskCreate(BAT_vCheckSampleCheduleTask,
+    status = xTaskCreate(BAT_vCheckSampleScheduleTask,
                 "CheckSampleCheduleTask",
 				BAT_SCHEDULETASK_STACK_SIZE,
                 NULL,
 				BAT_SCHEDULETASK_PRIORITY,
-				&BAT_vCheckSampleCheduleTask_handle);
+				&BAT_vCheckSampleScheduleTask_handle);
     configASSERT(status == pdPASS);
 
     // Run the purge task immediately at bat init
@@ -88,8 +83,6 @@ void BAT_vSampleTask(void *pvParameters)
 	uint8_t u8DelayMs;
 	uint16_t u16AdcResult;
 
-	bool bWasSleepActive = false;
-
     for(;;)
     {
         // Wait for a notification indefinitely
@@ -100,11 +93,7 @@ void BAT_vSampleTask(void *pvParameters)
             portMAX_DELAY
         );
 
-		bWasSleepActive = SYSTEM_bIsDeepSleepActive();
-		if (bWasSleepActive) {
-			BSP_LED_On(LED_RED);
-			SYSTEM_vDeactivateDeepSleep();
-		}
+        SYSTEM_vSleepLockAcquire();
 
         bDeltaLimit = ulNotifiedValue & BAT_NOTIFY_DELTA_LIMIT;
         bPurge = ulNotifiedValue & BAT_NOTIFY_PURGE_REQUEST;
@@ -180,9 +169,7 @@ void BAT_vSampleTask(void *pvParameters)
 		    }
 		}
 
-		if (bWasSleepActive) {
-			SYSTEM_vActivateDeepSleep();
-		}
+		SYSTEM_vSleepLockRelease();
 
     }
 
@@ -225,32 +212,35 @@ void BAT_vBufferPurgeTask(void *pvParameters)
     vTaskDelete(NULL);
 }
 
-void BAT_vCheckSampleCheduleTask(void *pvParameters)
+void BAT_vCheckSampleScheduleTask(void *pvParameters)
 {
+
+	PLATFORM_bSubscribeToHeartbeat(xTaskGetCurrentTaskHandle(),
+                        HB_ALLOW_IN_RECOVERY);
+
+	uint8_t u8UpdateCnt = 0;
 
 	for (;;)
 	{
-
-		// Wait 1s notification from PLATFORM module bliptask
-		// Todo: Use events for 1s actions in the future
+		// Wait 1s heartbeat
 		xTaskNotifyWait(
-			0x00,            // Don't clear bits on entry
-			ULONG_MAX,       // Clear all bits on exit
-			NULL,// Where the value is stored
+			0xFFFFFFFF,            // Don't clear bits on entry
+			0xFFFFFFFF,       // Clear all bits on exit
+			NULL,
 			portMAX_DELAY
 		);
 
-		if (TIMERS_bTimerIsExpired(&tBatSampleIntervalTmr))
+		if ( u8UpdateCnt % 10 == 0 )
 		{
-			// Notify sample task with delta limiting
-			if(!SYSTEM_bIsDeepSleepActive()) {
-				xTaskNotify(BAT_vSampleTask_handle, BAT_NOTIFY_DELTA_LIMIT, eSetBits);
-			} else {
-				BSP_LED_On(LED_RED);
-			}
+			// Clear counter
+			u8UpdateCnt = 0;
 
-			TIMERS_vTimerStart(&tBatSampleIntervalTmr, BAT_SAMPLE_INTERVAL);
+			// Notify sample task with delta limiting
+			xTaskNotify(BAT_vSampleTask_handle, BAT_NOTIFY_DELTA_LIMIT, eSetBits);
+
 		}
+		// Increment after aboove check!
+		u8UpdateCnt++;
 
 	}
 

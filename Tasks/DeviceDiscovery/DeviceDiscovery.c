@@ -17,6 +17,7 @@
 #include "dbg_log.h"
 #include "platform_rtc.h"
 #include "hal_rtc.h"
+#include "platform.h"
 
 // --- PRIVATE DEFINES ---
 #define APP_TASK_PRIORITY       	(configMAX_PRIORITIES - 3) // Lower priority for app logic
@@ -29,10 +30,13 @@ static EventGroupHandle_t xDiscoveryEventGroup;
 DeviceRole_e eDeviceRole;
 BaseType_t status;
 
-static TaskHandle_t xDeviceDiscoveryTaskHandle = NULL;
+static TaskHandle_t DeviceDiscoveryAppTask_handle;
+static TaskHandle_t DeviceDiscoveryWakeupTask_handle;
 
 static void DEVICE_DISCOVERY_vRecoveryMode(void);
 static void DEVICE_DISCOVERY_vSendTS(void);
+
+void DEVICE_DISCOVERY_vCheckWakeupScheduleTask(void *pvParameters);
 
 // --- PUBLIC FUNCTIONS ---
 
@@ -49,12 +53,16 @@ void DEVICE_DISCOVERY_vInit(void) {
                 APP_TASK_STACK_SIZE,
                 NULL,
                 APP_TASK_PRIORITY,
-                &xDeviceDiscoveryTaskHandle);
+                &DeviceDiscoveryAppTask_handle);
     configASSERT(status == pdPASS);
 
-    eDeviceRole = HAL_GPIO_ReadPin(BSP_VERSION_BIT0_PORT, BSP_VERSION_BIT0_PIN) ? DEVICE_ROLE_PRIMARY : DEVICE_ROLE_SECONDARY ;
-
-    HAL_GPIO_DeInit(BSP_VERSION_BIT0_PORT, BSP_VERSION_BIT0_PIN);
+    status = xTaskCreate(DEVICE_DISCOVERY_vCheckWakeupScheduleTask,
+                "CheckWakeupScheduleTask",
+				configMINIMAL_STACK_SIZE,
+                NULL,
+				(configMAX_PRIORITIES - 4),
+				&DeviceDiscoveryWakeupTask_handle);
+    configASSERT(status == pdPASS);
 
     DBG("DeviceDiscovery: Initialized FreeRTOS resources and created DeviceDiscoveryAppTask.\r\n");
     if (eDeviceRole == DEVICE_ROLE_PRIMARY)
@@ -289,39 +297,60 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 	}
 }
 
-
-void DEVICE_DISCOVERY_vCheckWakeupSchedule(void)
+void DEVICE_DISCOVERY_vCheckWakeupScheduleTask(void *pvParameters)
 {
 
-	// Check for wakeup condition
-	if(RTC_u64GetUTC() % (((uint64_t)MESHNETWORK_u8GetWakeupInterval())*60) == 0 )
+	PLATFORM_bSubscribeToHeartbeat(xTaskGetCurrentTaskHandle(),
+                        HB_ALLOW_IN_RECOVERY);
+
+	for (;;)
 	{
 
-		SYSTEM_vDeactivateDeepSleep();
+		// Wait 1s heartbeat
+		xTaskNotifyWait(
+			0x00,            // Don't clear bits on entry
+			0xFFFFFFFF,       // Clear all bits on exit
+			NULL,
+			portMAX_DELAY
+		);
 
-		if (eDeviceRole == DEVICE_ROLE_PRIMARY)
+		// Check for wakeup condition
+		if(RTC_u64GetUTC() % (((uint64_t)MESHNETWORK_u8GetWakeupInterval())*60) == 0 )
 		{
-			FARMRANGER_vUartOnWake();
+
+			SYSTEM_vDeactivateDeepSleep();
+
+			if (eDeviceRole == DEVICE_ROLE_PRIMARY)
+			{
+				FARMRANGER_vUartOnWake();
+			}
+
+	#ifdef ENABLE_DBG_UART
+			HAL_UART_vInit();
+			DBG_UART_vInit();
+	#endif
+
+			LORARADIO_vWakeUp();
+
+		    DBG("\r\n--- WAKEUP ---\r\n");
+		    xEventGroupSetBits(xDiscoveryEventGroup, DISCOVERY_WAKEUP_BIT);
 		}
 
-#ifdef ENABLE_DBG_UART
-		HAL_UART_vInit();
-		DBG_UART_vInit();
-#endif
-
-		LORARADIO_vWakeUp();
-
-	    DBG("\r\n--- WAKEUP ---\r\n");
-	    xEventGroupSetBits(xDiscoveryEventGroup, DISCOVERY_WAKEUP_BIT);
 	}
 
+    vTaskDelete(NULL);
 }
-
 
 static void DEVICE_DISCOVERY_vSendTS(void)
 {
     DBG("\r\n--- START TIMESYNC ---\r\n");
 	MESHNETWORK_vSendTimeSync(RTC_u64GetUTC(), MESHNETWORK_tGetWakeupInterval());
+}
+
+void DEVICE_DISCOVERY_vConfigDeviceRole(void)
+{
+    eDeviceRole = HAL_GPIO_ReadPin(BSP_VERSION_BIT0_PORT, BSP_VERSION_BIT0_PIN) ? DEVICE_ROLE_PRIMARY : DEVICE_ROLE_SECONDARY ;
+    HAL_GPIO_DeInit(BSP_VERSION_BIT0_PORT, BSP_VERSION_BIT0_PIN);
 }
 
 DeviceRole_e DEVICE_DISCOVERY_eGetDeviceRole(void)
@@ -359,7 +388,7 @@ static void DEVICE_DISCOVERY_vRecoveryMode(void)
 
 TaskHandle_t DEVICE_DISCOVERY_xGetTaskHandle(void)
 {
-    return xDeviceDiscoveryTaskHandle;
+    return DeviceDiscoveryAppTask_handle;
 }
 
 

@@ -40,12 +40,7 @@ void DEVICE_DISCOVERY_vInit(void);
  */
 void DEVICE_DISCOVERY_vAppTask(void *pvParameters);
 
-/**
- * @brief External function to simulate a synchronized wake-up event.
- * In a real system, this would be called by an RTC or timer ISR.
- */
-void DEVICE_DISCOVERY_vCheckWakeupSchedule(void);
-
+void DEVICE_DISCOVERY_vConfigDeviceRole(void);
 DeviceRole_e DEVICE_DISCOVERY_eGetDeviceRole(void);
 
 TaskHandle_t DEVICE_DISCOVERY_xGetTaskHandle(void);
