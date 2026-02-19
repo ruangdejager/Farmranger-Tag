@@ -83,36 +83,36 @@ void MPPTCHG_vPinChangeCallback(void)
 void MPPTCHG_vInit(void)
 {
 
-//    BaseType_t status;
-//    status = xTaskCreate(MPPTCHG_vPgStateTask,
-//                "PgStateTask",
-//				MPPT_TASK_STACK_SIZE,
-//                NULL,
-//				MPPT_PGSTATETASK_PRIORITY,
-//				&MPPTCHG_vPgStateTask_handle);
-//    configASSERT(status == pdPASS);
-//
-//    status = xTaskCreate(MPPTCHG_vMpptTask,
-//                "MpptTask",
-//				MPPT_TASK_STACK_SIZE,
-//                NULL,
-//				MPPT_MPPTTASK_PRIORITY,
-//				&MPPTCHG_vMpptTask_handle);
-//    configASSERT(status == pdPASS);
-//
-//	// Interrupt set up by HAL, just register callback
-//	MPPTCHG_DRIVER_vRegisterCallback(MPPTCHG_vPinChangeCallback);
-//
-//	// PG
-//	// Don't init PG line here
-//	// Don't init PG interrupt here
-//	PgState = CHG_PG_STATE_UNKNOWN;
-//	MPPTCHG_DRIVER_vInitGpio();
+    BaseType_t status;
+    status = xTaskCreate(MPPTCHG_vPgStateTask,
+                "PgStateTask",
+				MPPT_TASK_STACK_SIZE,
+                NULL,
+				MPPT_PGSTATETASK_PRIORITY,
+				&MPPTCHG_vPgStateTask_handle);
+    configASSERT(status == pdPASS);
+
+    status = xTaskCreate(MPPTCHG_vMpptTask,
+                "MpptTask",
+				MPPT_TASK_STACK_SIZE,
+                NULL,
+				MPPT_MPPTTASK_PRIORITY,
+				&MPPTCHG_vMpptTask_handle);
+    configASSERT(status == pdPASS);
+
+	// Interrupt set up by HAL, just register callback
+	MPPTCHG_DRIVER_vRegisterCallback(MPPTCHG_vPinChangeCallback);
+
+	// PG
+	// Don't init PG line here
+	// Don't init PG interrupt here
+	PgState = CHG_PG_STATE_UNKNOWN;
+	MPPTCHG_DRIVER_vInitGpio();
 
 	tMpptState = CHG_SEL_MPPT_20mA;
 	MPPTCHG_DRIVER_vSetMppt20mA();
 
-//	MPPTCHG_vClearMpptStateCounters();
+	MPPTCHG_vClearMpptStateCounters();
 
 }
 
