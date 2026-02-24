@@ -13,8 +13,6 @@
 //! Charge state definition
 typedef enum chg_mppt_state_t {
 	CHG_SEL_MPPT_OFF=0,
-	CHG_SEL_MPPT_5mA,
-	CHG_SEL_MPPT_10mA,
 	CHG_SEL_MPPT_15mA,
 	CHG_SEL_MPPT_20mA,
 	CHG_SEL_MPPT_25mA,

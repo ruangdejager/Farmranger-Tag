@@ -19,6 +19,7 @@
 #include "hal_rtc.h"
 #include "platform.h"
 #include "Power.h"
+#include "MpptChg.h"
 
 // --- PRIVATE DEFINES ---
 #define APP_TASK_PRIORITY       	(configMAX_PRIORITIES - 3) // Lower priority for app logic
@@ -137,7 +138,6 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 					}
 
 				}
-
 
 				if (!bBeaconSeenThisWave)
 				{
@@ -286,20 +286,29 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 		}
 
 		/* ---- Deep sleep normally ---- */
-		vTaskDelay(pdMS_TO_TICKS(5000));
 		/* Reset the node role for the next discovery round */
 		MESHNETWORK_vResetNodeRole();
+
+		if ( (eDeviceRole == DEVICE_ROLE_SECONDARY))
+		{
+	        DBG("\r\n\r\n*---MPPT---\r\n");
+	        DBG("*Mppt chg level times (These are reset at ToD change) :\r\n");
+	        DBG("*Mppt OFF = %us\r\n", MPPTCHG_u32GetOffMpptCounter());
+	        DBG("*Mppt at 5mA = %us\r\n", MPPTCHG_u32Get5mAMpptCounter());
+	        DBG("*Mppt at 10mA = %us\r\n", MPPTCHG_u32Get10mAMpptCounter());
+	        DBG("*Mppt at 15mA = %us\r\n", MPPTCHG_u32Get15mAMpptCounter());
+	        DBG("*Mppt at 20mA = %us\r\n", MPPTCHG_u32Get20mAMpptCounter());
+	    	DBG("*Mppt at 25mA = %us\r\n", MPPTCHG_u32Get25mAMpptCounter());
+	    	DBG("*Mppt at 30mA = %us\r\n", MPPTCHG_u32Get30mAMpptCounter());
+	    	DBG("*Mppt at 35mA = %us\r\n", MPPTCHG_u32Get35mAMpptCounter());
+	    	DBG("*Mppt at 40mA = %us\r\n\r\n", MPPTCHG_u32Get40mAMpptCounter());
+		}
+
 		DBG("DeviceDiscovery: Waiting for synchronized wake-up...\r\n");
 		vTaskDelay(pdMS_TO_TICKS(100));
 		/* Turn off radio and deep sleep... zzz... */
 		LORARADIO_vEnterDeepSleep();
 		SYSTEM_vActivateDeepSleep();
-
-		/* If power class is in recovery mode we halt the discovery app */
-		if (DEVICE_DISCOVERY_eGetDeviceRole() == DEVICE_ROLE_SECONDARY)
-		{
-			POWER_vWaitForClass(POWER_CLASS_NORMAL);
-		}
 
 	}
 }
@@ -325,22 +334,28 @@ void DEVICE_DISCOVERY_vCheckWakeupScheduleTask(void *pvParameters)
 		if(RTC_u64GetUTC() % (((uint64_t)MESHNETWORK_u8GetWakeupInterval())*60) == 0 )
 		{
 
-			SYSTEM_vDeactivateDeepSleep();
-
-			if (eDeviceRole == DEVICE_ROLE_PRIMARY)
+			if ( (POWER_tGetState() & POWER_CLASS_NORMAL) )
 			{
-				FARMRANGER_vUartOnWake();
+
+				SYSTEM_vDeactivateDeepSleep();
+
+				if (eDeviceRole == DEVICE_ROLE_PRIMARY)
+				{
+					FARMRANGER_vUartOnWake();
+				}
+
+		#ifdef ENABLE_DBG_UART
+				HAL_UART_vInit();
+				DBG_UART_vInit();
+		#endif
+
+				LORARADIO_vWakeUp();
+
+			    DBG("\r\n--- WAKEUP ---\r\n");
+			    xEventGroupSetBits(xDiscoveryEventGroup, DISCOVERY_WAKEUP_BIT);
+
 			}
 
-	#ifdef ENABLE_DBG_UART
-			HAL_UART_vInit();
-			DBG_UART_vInit();
-	#endif
-
-			LORARADIO_vWakeUp();
-
-		    DBG("\r\n--- WAKEUP ---\r\n");
-		    xEventGroupSetBits(xDiscoveryEventGroup, DISCOVERY_WAKEUP_BIT);
 		}
 
 	}

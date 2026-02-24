@@ -45,6 +45,7 @@ uint32_t u32mppt35mACntr;
 uint32_t u32mppt40mACntr;
 
 chg_pg_state_t PgState;
+bool bPgInitFlag = false;
 //! PG line change flag; set in ISR, cleared in CHG_ccrTaskPg()
 volatile bool bChgPgChangeFlag;
 // The state of charge when in mppt mode
@@ -60,6 +61,10 @@ void MPPTCHG_vMpptTask(void *pvParameters);
 void MPPTCHG_vUpdateMpptState(chg_mppt_bump_t tMpptBump);
 void MPPTCHG_vSetMpptChgLevel(chg_mppt_state_t tMpptChgLevelSet);
 chg_mppt_state_t MPPTCHG_tGetMpptChgLevel(void);
+
+chg_pg_state_t MPPTCHG_tGetPgState();
+void MPPTCHG_vInitPgPins(void);
+void MPPTCHG_vDeinitPgPins(void);
 
 /*
 static void MPPTCHG_vGenericTimerCallback(TimerHandle_t xTimer);
@@ -106,11 +111,11 @@ void MPPTCHG_vInit(void)
 	// PG
 	// Don't init PG line here
 	// Don't init PG interrupt here
-	PgState = CHG_PG_STATE_UNKNOWN;
-	MPPTCHG_DRIVER_vInitGpio();
+	PgState = CHG_PG_STATE_UNSTABLE;
+	MPPTCHG_vInitPgPins();
 
-	tMpptState = CHG_SEL_MPPT_20mA;
-	MPPTCHG_DRIVER_vSetMppt20mA();
+	tMpptState = CHG_SEL_MPPT_15mA;
+	MPPTCHG_DRIVER_vSetMppt15mA();
 
 	MPPTCHG_vClearMpptStateCounters();
 
@@ -125,7 +130,6 @@ void MPPTCHG_vPgStateTask(void *pvParameters)
 
     bool bChgPgChange;
     bool bWasSleepActive = false;
-    uint8_t u8TmrCnt = 0;
 
     for (;;)
     {
@@ -143,16 +147,16 @@ void MPPTCHG_vPgStateTask(void *pvParameters)
 	            portMAX_DELAY
 	        );
 
-			if ( bChgPgChangeFlag || (PgState == CHG_PG_STATE_UNSTABLE) ) break;
+			if ( bChgPgChangeFlag || (PgState == CHG_PG_STATE_UNSTABLE) || (tMpptState != CHG_SEL_MPPT_OFF) ) break;
 
+			// Increment before check!
+			u8CheckPGIntervalTmrCnt++;
 			// Incase we are stuck with power good
-			if ( u8TmrCnt % 30 == 0 )
+			if ( u8CheckPGIntervalTmrCnt % 60 == 0 )
 			{
-				u8TmrCnt = 0;
+				u8CheckPGIntervalTmrCnt = 0;
 				break;
 			}
-			// Increment after aboove check!
-			u8TmrCnt++;
 
 		}
 
@@ -161,7 +165,7 @@ void MPPTCHG_vPgStateTask(void *pvParameters)
 			SYSTEM_vDeactivateDeepSleep();
 		}
 
-		if (tMpptState == CHG_SEL_MPPT_OFF) MPPTCHG_DRIVER_vInitGpio();
+		if (tMpptState == CHG_SEL_MPPT_OFF) MPPTCHG_vInitPgPins();
 
 		// Eval flag, update PG status
 		// Wait out settling time
@@ -175,10 +179,10 @@ void MPPTCHG_vPgStateTask(void *pvParameters)
 		if (bChgPgChange) {
 			PgState = CHG_PG_STATE_UNSTABLE;
 		} else {
-			PgState = ( MPPTCHG_DRIVER_bGetPgPins() ? CHG_PG_STATE_HIGH : CHG_PG_STATE_LOW);
+			PgState = MPPTCHG_tGetPgState();
 		}
 
-		if (tMpptState == CHG_SEL_MPPT_OFF) MPPTCHG_DRIVER_vDeinitGpio();
+		if (tMpptState == CHG_SEL_MPPT_OFF) MPPTCHG_vDeinitPgPins();
 
 		if (bWasSleepActive) {
 			SYSTEM_vActivateDeepSleep();
@@ -226,8 +230,8 @@ void MPPTCHG_vMpptTask(void *pvParameters)
 				// This happens in the bump down function
 				MPPTCHG_vUpdateMpptState(CHG_BUMP_MPPT_DOWN);
 				// We reset the mppt off countdown timer
-				// When mppt state has been at CHG_SEL_MPPT_20mA for 5 minutes and Power is NOT GOOD -> Enter OFF state
-				if (tMpptState != CHG_SEL_MPPT_5mA)
+				// When mppt state has been at CHG_SEL_MPPT_5mA for 5 minutes and Power is NOT GOOD -> Enter OFF state
+				if (tMpptState != CHG_SEL_MPPT_15mA)
 				{
 					u16MpptOffCountdownTmrCnt = 0;
 				}
@@ -236,7 +240,6 @@ void MPPTCHG_vMpptTask(void *pvParameters)
 
 				MPPTCHG_vUpdateMpptState(CHG_BUMP_MPPT_UP);
 			}
-
 			u8MpptTmrCnt = 0;
 
 		}
@@ -256,38 +259,20 @@ void MPPTCHG_vUpdateMpptState(chg_mppt_bump_t tMpptBump)
 			if (tMpptBump == CHG_BUMP_MPPT_DOWN) return;
 			if (tMpptBump == CHG_BUMP_MPPT_UP)
 			{
-				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_5mA);
+				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_15mA);
 				// Init the PG line
-				MPPTCHG_DRIVER_vInitGpio();
+				MPPTCHG_vInitPgPins();
 				// Forces a check on PG
 				PgState = CHG_PG_STATE_UNSTABLE;
 				u16MpptOffCountdownTmrCnt = 270;
 			}
 			break;
-		case CHG_SEL_MPPT_5mA:
-			if (tMpptBump == CHG_BUMP_MPPT_DOWN && (u16MpptOffCountdownTmrCnt == 300) )
+		case CHG_SEL_MPPT_15mA:
+			if (tMpptBump == CHG_BUMP_MPPT_DOWN && (u16MpptOffCountdownTmrCnt >= 300) )
 			{
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_OFF);
 				// De-Init the PG line
-				MPPTCHG_DRIVER_vDeinitGpio();
-			}
-			if (tMpptBump == CHG_BUMP_MPPT_UP) {
-				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_10mA);
-			}
-			break;
-		case CHG_SEL_MPPT_10mA:
-			if (tMpptBump == CHG_BUMP_MPPT_DOWN)
-			{
-				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_5mA);
-			}
-			if (tMpptBump == CHG_BUMP_MPPT_UP) {
-				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_15mA);
-			}
-			break;
-		case CHG_SEL_MPPT_15mA:
-			if (tMpptBump == CHG_BUMP_MPPT_DOWN)
-			{
-				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_10mA);
+				MPPTCHG_vDeinitPgPins();
 			}
 			if (tMpptBump == CHG_BUMP_MPPT_UP) {
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_20mA);
@@ -351,16 +336,6 @@ void MPPTCHG_vSetMpptChgLevel(chg_mppt_state_t tMpptChgLevelSet)
 			tMpptState = CHG_SEL_MPPT_OFF;
 			DBG("\r\nMPPT SET: OFF\r\n");
 			break;
-		case CHG_SEL_MPPT_5mA:
-			tMpptState = CHG_SEL_MPPT_5mA;
-			MPPTCHG_DRIVER_vSetMppt5mA();
-			DBG("\r\nMPPT SET: 5mA\r\n");
-			break;
-		case CHG_SEL_MPPT_10mA:
-			tMpptState = CHG_SEL_MPPT_10mA;
-			MPPTCHG_DRIVER_vSetMppt10mA();
-			DBG("\r\nMPPT SET: 10mA\r\n");
-			break;
 		case CHG_SEL_MPPT_15mA:
 			tMpptState = CHG_SEL_MPPT_15mA;
 			MPPTCHG_DRIVER_vSetMppt15mA();
@@ -401,38 +376,27 @@ chg_mppt_state_t MPPTCHG_tGetMpptChgLevel(void)
 	return tMpptState;
 }
 
-/*
-void MPPTCHG_vStartTimerSeconds(TimerHandle_t tmr, uint32_t seconds)
+chg_pg_state_t MPPTCHG_tGetPgState()
 {
-    volatile bool *flag =
-        (volatile bool *) pvTimerGetTimerID(tmr);
-
-    *flag = false;   // reset before starting
-
-    // Change timer period to "seconds"
-    xTimerChangePeriod(tmr, pdMS_TO_TICKS(seconds * 1000), 0);
+	if (!bPgInitFlag) return CHG_PG_STATE_HIGH;
+	return ( MPPTCHG_DRIVER_bGetPgPins() ? CHG_PG_STATE_HIGH : CHG_PG_STATE_LOW);
 }
-
-static void MPPTCHG_vGenericTimerCallback(TimerHandle_t xTimer)
+void MPPTCHG_vInitPgPins(void)
 {
-    volatile bool *flag =
-        (volatile bool *) pvTimerGetTimerID(xTimer);
-
-    *flag = true;    // mark expired
+	MPPTCHG_DRIVER_vInitGpio();
+	bPgInitFlag = true;
 }
-*/
+void MPPTCHG_vDeinitPgPins(void)
+{
+	MPPTCHG_DRIVER_vDeinitGpio();
+	bPgInitFlag = false;
+}
 
 void MPPTCHG_vIncMpptStateCounters(void)
 {
 	switch (tMpptState) {
 		case CHG_SEL_MPPT_OFF:
 			u32mpptOffCntr++;
-			break;
-		case CHG_SEL_MPPT_5mA:
-			u32mppt5mACntr++;
-			break;
-		case CHG_SEL_MPPT_10mA:
-			u32mppt10mACntr++;
 			break;
 		case CHG_SEL_MPPT_15mA:
 			u32mppt15mACntr++;

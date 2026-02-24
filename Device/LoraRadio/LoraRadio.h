@@ -16,6 +16,15 @@
 
 #include "LoraRadio_Config.h"
 
+#define RADIO_EVT_RX_DONE        (1UL << 0)
+#define RADIO_EVT_TX_DONE        (1UL << 1)
+#define RADIO_EVT_CRC_ERROR      (1UL << 2)
+#define RADIO_EVT_HEADER_ERROR   (1UL << 3)
+#define RADIO_EVT_TIMEOUT        (1UL << 4)
+#define RADIO_EVT_CAD_CLEAR      (1UL << 5)
+#define RADIO_EVT_CAD_BUSY       (1UL << 6)
+#define RADIO_EVT_TX_PENDING     (1UL << 7)
+
 // Structure for a raw LoRa packet (used for both TX and RX)
 typedef struct {
     uint8_t buffer[LORA_MAX_PACKET_SIZE];
@@ -48,19 +57,7 @@ bool LORARADIO_bRxPacket(LoraRadio_Packet_t * packet);
  */
 bool LORARADIO_bTxPacket(LoraRadio_Packet_t * packet);
 
-/**
- * @brief LoRa Radio RX FreeRTOS Task.
- * This task manages the low-level LoRa hardware reception communication,
- * pushing received packets to the RX queue.
- */
-void LORARADIO_vRxTask(void *parameters);
-
-/**
- * @brief LoRa Radio RX FreeRTOS Task.
- * This task manages the low-level LoRa hardware reception communication,
- * sending packets from the TX queue.
- */
-void LORARADIO_vTxTask(void *parameters);
+void LORARADIO_vRadioTask(void *arg);
 
 /**
  * @brief The function return the Lora device's unique ID
@@ -80,6 +77,12 @@ void LORARADIO_vEventRxDone(void);
   * @retval None
   */
 void LORARADIO_vEventTxDone(void);
+
+void LORARADIO_vEventCrcError(void);
+
+void LORARADIO_vEventHeaderError(void);
+
+void LORARADIO_vEventTimeout(void);
 
 void LORARADIO_vEventCADDetected(void);
 

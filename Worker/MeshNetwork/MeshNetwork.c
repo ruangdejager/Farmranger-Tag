@@ -27,7 +27,7 @@
 #define MESH_PRIMARY_ACK_INTERVAL_MS_CFG 		MESH_PRIMARY_ACK_INTERVAL_MS
 #define MESH_DISCOVERY_IDLE_MS_CFG 				MESH_DISCOVERY_IDLE_MS
 
-#define MESH_TX_QUEUE_LEN        16
+#define MESH_TX_QUEUE_LEN        24
 #define MESH_TX_MAX_PACKET_SIZE  128
 
 typedef struct
@@ -59,7 +59,7 @@ static uint8_t u8NodeHopCount = 0;
 static NodeRole_e eNodeRole = NODE_ROLE_UNKNOWN;
 
 /* Wakeup interval */
-static WakeupInterval tCurrentWakeupInterval = WAKEUP_INTERVAL_30_MIN;
+static WakeupInterval tCurrentWakeupInterval = WAKEUP_INTERVAL_15_MIN;
 static const uint8_t u8CurrentWakeupIntervalMin[] = {
 [WAKEUP_INTERVAL_15_MIN] = 15,
 [WAKEUP_INTERVAL_30_MIN] = 30,
@@ -128,7 +128,7 @@ static inline int16_t read_s16_be(const uint8_t *p)
 /* Forward ring operations */
 static bool FORWARD_bHasSeen(uint32_t u32MsgId) {
     bool bFound = false;
-    if (xSemaphoreTake(xForwardRingMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+    if (xSemaphoreTake(xForwardRingMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         for (uint8_t i=0;i < tForwardRing.u8Count;i++) {
             uint8_t u8Idx = (tForwardRing.u8Head + FORWARD_RING_SIZE - tForwardRing.u8Count + i) % FORWARD_RING_SIZE;
             if (tForwardRing.u32Ring[u8Idx] == u32MsgId) { bFound = true; break; }
@@ -138,7 +138,7 @@ static bool FORWARD_bHasSeen(uint32_t u32MsgId) {
     return bFound;
 }
 static void FORWARD_vAdd(uint32_t u32MsgId) {
-    if (xSemaphoreTake(xForwardRingMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+    if (xSemaphoreTake(xForwardRingMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         tForwardRing.u32Ring[tForwardRing.u8Head] = u32MsgId;
         tForwardRing.u8Head = (tForwardRing.u8Head + 1) % FORWARD_RING_SIZE;
         if (tForwardRing.u8Count < FORWARD_RING_SIZE) tForwardRing.u8Count++;
@@ -525,24 +525,24 @@ void MESHNETWORK_vParserTask(void *pvParameters) {
 
 static void MESHNETWORK_vTxTask(void *pvParameters)
 {
-    (void)pvParameters;
-
     MeshTxItem_t tItem;
 
     for (;;)
     {
-        if (xQueueReceive(xMeshTxQueue, &tItem, portMAX_DELAY) == pdTRUE)
+        if (xQueueReceive(xMeshTxQueue, &tItem, portMAX_DELAY))
         {
             TickType_t now = xTaskGetTickCount();
 
             if (tItem.tReadyTick > now)
             {
-                vTaskDelay(tItem.tReadyTick - now);
+                // Not ready yet → requeue and try later
+                xQueueSendToBack(xMeshTxQueue, &tItem, 0);
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
             }
 
             DBG("MeshNetwork: TX (len=%u)\r\n",
                 tItem.u16Len);
-
             TX_bSendRaw(tItem.u8Buf, tItem.u16Len);
         }
     }
@@ -589,7 +589,7 @@ void MESHNETWORK_vInit(void) {
 			"MeshParser",
 			configMINIMAL_STACK_SIZE * 5,
 			NULL,
-			configMAX_PRIORITIES - 2,
+			configMAX_PRIORITIES - 3,
 			&xParserTaskHandle);
     configASSERT(xRes == pdPASS);
 
@@ -599,7 +599,7 @@ void MESHNETWORK_vInit(void) {
             "MeshTx",
             configMINIMAL_STACK_SIZE * 4,
             NULL,
-            configMAX_PRIORITIES - 1,   /* Higher than parser */
+            configMAX_PRIORITIES - 2,   /* Higher than parser */
             &xMeshTxTaskHandle);
 
     configASSERT(xTxRes == pdPASS);
