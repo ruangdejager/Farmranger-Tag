@@ -33,6 +33,9 @@ static QueueHandle_t xLoRaRxQueue; // Queue for raw received packets from LoraRa
 // --- PRIVATE FREE_RTOS TASK HANDLEs ---
 TaskHandle_t LORARADIO_vRadioTask_handle;
 
+/* pending events captured while inside carrier-sense/backoff */
+static volatile uint32_t gRadioPendingEvents = 0;
+
 // --- LOCAL VARIABLE DEFINES ---
 static uint8_t u8DevEUI[8];
 
@@ -40,6 +43,24 @@ static uint8_t u8DevEUI[8];
 
 static uint8_t LORARADIO_u8CRC8_Calculate(const uint8_t *data, uint16_t len);
 static void LORARADIO_vNotifyFromISR(uint32_t evt);
+
+static inline void LORARADIO_vStashPendingEvents(uint32_t evt)
+{
+    taskENTER_CRITICAL();
+    gRadioPendingEvents |= evt;
+    taskEXIT_CRITICAL();
+}
+
+/* Consume and clear pending events (called from main radio loop) */
+static inline uint32_t LORARADIO_u32ConsumePendingEvents(void)
+{
+    uint32_t v;
+    taskENTER_CRITICAL();
+    v = gRadioPendingEvents;
+    gRadioPendingEvents = 0;
+    taskEXIT_CRITICAL();
+    return v;
+}
 
 // --- PUBLIC FUNCTIONS ---
 
@@ -106,7 +127,44 @@ void LORARADIO_vRadioTask(void *arg)
     for (;;)
     {
         /* Wait for IRQ or TX request */
-        xTaskNotifyWait(0, ULONG_MAX, &events, portMAX_DELAY);
+        xTaskNotifyWait(0, ULONG_MAX, &events, pdMS_TO_TICKS(50));
+
+        /* ---------- TX REQUEST ---------- */
+        if (events & RADIO_EVT_TX_PENDING ||
+            uxQueueMessagesWaiting(xLoRaTxQueue))
+        {
+            while (xQueueReceive(xLoRaTxQueue, &pkt, 0) == pdPASS)
+            {
+                uint8_t crc = LORARADIO_u8CRC8_Calculate(pkt.buffer, pkt.length);
+                pkt.buffer[pkt.length++] = crc;
+
+                /* inside radio task when handling a TX attempt */
+                if (!LORARADIO_bCarrierSenseAndWait(5000))
+                {
+                    /* If stashed events exist, merge them into events to be processed immediately */
+                    uint32_t pending = LORARADIO_u32ConsumePendingEvents();
+                    if (pending)
+                    {
+                        /* Merge into the current events mask so the loop processes it right away.
+                           Note: if you had local 'events' variable, OR it in; here I'm assuming you have
+                           an outer events variable the loop inspects. */
+                        events |= pending;
+                        DBG("Carrier-sense interrupted by events 0x%08X\r\n", pending);
+                        /* Re-enter RX before continuing; we'll loop and handle 'events' */
+                        LORARADIO_DRIVER_vEnterRxMode(0);
+                        continue;
+                    }
+
+                    DBG("Abort TX busy\r\n");
+                    LORARADIO_DRIVER_vEnterRxMode(0);
+                    continue;
+                }
+
+                LORARADIO_DRIVER_bTransmitPayload(pkt.buffer, pkt.length);
+
+                LORARADIO_DRIVER_vEnterRxMode(0x00);
+            }
+        }
 
         /* ---------- RX DONE ---------- */
         if (events & RADIO_EVT_RX_DONE)
@@ -161,27 +219,6 @@ void LORARADIO_vRadioTask(void *arg)
             LORARADIO_DRIVER_vEnterRxMode(0);
         }
 
-        /* ---------- TX REQUEST ---------- */
-        if (events & RADIO_EVT_TX_PENDING ||
-            uxQueueMessagesWaiting(xLoRaTxQueue))
-        {
-            if (xQueueReceive(xLoRaTxQueue, &pkt, 0) == pdPASS)
-            {
-                uint8_t crc = LORARADIO_u8CRC8_Calculate(pkt.buffer, pkt.length);
-                pkt.buffer[pkt.length++] = crc;
-
-                if (!LORARADIO_bCarrierSenseAndWait(5000))
-                {
-                    DBG("Abort TX busy\r\n");
-                    LORARADIO_DRIVER_vEnterRxMode(0);
-                    continue;
-                }
-
-                LORARADIO_DRIVER_bTransmitPayload(pkt.buffer, pkt.length);
-
-                LORARADIO_DRIVER_vEnterRxMode(0x00);
-            }
-        }
     }
 }
 
@@ -354,15 +391,15 @@ uint32_t LORARADIO_u32GetRandomNumber(uint32_t max_value)
   */
 bool LORARADIO_bCarrierSense(void)
 {
-
-    // Start CAD detection
+    /* Start CAD detection */
     LORARADIO_DRIVER_vEnterCAD();
 
     uint32_t notifyValue = 0;
 
-    // Wait for IRQ to notify us (CAD_DONE or CAD_DETECTED)
-    if (xTaskNotifyWait(0, ULONG_MAX, &notifyValue, pdMS_TO_TICKS(1000)) == pdTRUE)
+    /* Wait for IRQ to notify us (CAD_CLEAR or CAD_DETECTED) */
+    if (xTaskNotifyWait(0, ULONG_MAX, &notifyValue, pdMS_TO_TICKS(300)) == pdTRUE)
     {
+        /* If CAD result, handle normally */
         if (notifyValue & RADIO_EVT_CAD_BUSY)
         {
             DBG("CAD: Channel busy\r\n");
@@ -373,23 +410,36 @@ bool LORARADIO_bCarrierSense(void)
             DBG("CAD: Channel clear\r\n");
             return true;
         }
+        else
+        {
+            /* Some other IRQ arrived (RX_DONE, CRC_ERROR, HEADER_ERROR, TIMEOUT, TX_DONE, etc).
+               Stash it and return false to indicate caller should process those events. */
+            LORARADIO_vStashPendingEvents(notifyValue);
+            return false;
+        }
     }
 
     DBG("CAD: Timeout, assuming channel busy\r\n");
-    return false; // Fail safe if no response
+    return false; /* Fail-safe if no response */
 }
-
 
 bool LORARADIO_bCarrierSenseAndWait(uint32_t maxWaitMs)
 {
-    uint32_t startTick = xTaskGetTickCount();
+    TickType_t startTick = xTaskGetTickCount();
     uint32_t failCount = 0;
 
     while ((xTaskGetTickCount() - startTick) < pdMS_TO_TICKS(maxWaitMs))
     {
+        /* If CAD says clear → success */
         if (LORARADIO_bCarrierSense())
         {
-            return true;    // SUCCESS → reset behavior implicitly
+            return true;
+        }
+
+        /* If there are stashed events (e.g. RX_DONE) then bail so main loop handles them */
+        if (gRadioPendingEvents)
+        {
+            return false; /* Interrupted: caller should process events */
         }
 
         /* ---- Adaptive backoff ---- */
@@ -411,7 +461,22 @@ bool LORARADIO_bCarrierSenseAndWait(uint32_t maxWaitMs)
             backoffMs,
             failCount);
 
-        vTaskDelay(pdMS_TO_TICKS(backoffMs));
+        /* Wait for either IRQ (which will be captured by xTaskNotifyFromISR) or timeout backoffMs.
+           If an IRQ is received, xTaskNotifyWait returns immediately with flags — stash them and exit. */
+        uint32_t evt = 0;
+        if (xTaskNotifyWait(0, ULONG_MAX, &evt, pdMS_TO_TICKS(backoffMs)) == pdTRUE)
+        {
+            /* If CAD result → handle immediately */
+            if (evt & RADIO_EVT_CAD_CLEAR)
+                return true;
+
+            if (evt & RADIO_EVT_CAD_BUSY)
+                return false;
+
+            /* Otherwise stash and exit */
+            LORARADIO_vStashPendingEvents(evt);
+            return false;
+        }
 
         failCount++;
     }

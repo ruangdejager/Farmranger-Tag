@@ -262,13 +262,13 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 			/* Discovery finished: send TimeSync */
 			DEVICE_DISCOVERY_vSendTS();
 
-			vTaskDelay(pdMS_TO_TICKS(5000));
+			vTaskDelay(pdMS_TO_TICKS(10000));
 
 		}
 		else
 		{
 			/* Secondary nodes just chill after rounds */
-			vTaskDelay(pdMS_TO_TICKS(5000));
+			vTaskDelay(pdMS_TO_TICKS(10000));
 		}
 
 		// ---------------------------------------------------------------------
