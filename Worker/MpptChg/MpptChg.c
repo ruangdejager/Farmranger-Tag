@@ -439,16 +439,6 @@ uint32_t MPPTCHG_u32GetOffMpptCounter(void)
 	return u32mpptOffCntr;
 }
 
-uint32_t MPPTCHG_u32Get5mAMpptCounter(void)
-{
-	return u32mppt5mACntr;
-}
-
-uint32_t MPPTCHG_u32Get10mAMpptCounter(void)
-{
-	return u32mppt10mACntr;
-}
-
 uint32_t MPPTCHG_u32Get15mAMpptCounter(void)
 {
 	return u32mppt15mACntr;

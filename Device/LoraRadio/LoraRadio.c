@@ -129,43 +129,6 @@ void LORARADIO_vRadioTask(void *arg)
         /* Wait for IRQ or TX request */
         xTaskNotifyWait(0, ULONG_MAX, &events, pdMS_TO_TICKS(50));
 
-        /* ---------- TX REQUEST ---------- */
-        if (events & RADIO_EVT_TX_PENDING ||
-            uxQueueMessagesWaiting(xLoRaTxQueue))
-        {
-            while (xQueueReceive(xLoRaTxQueue, &pkt, 0) == pdPASS)
-            {
-                uint8_t crc = LORARADIO_u8CRC8_Calculate(pkt.buffer, pkt.length);
-                pkt.buffer[pkt.length++] = crc;
-
-                /* inside radio task when handling a TX attempt */
-                if (!LORARADIO_bCarrierSenseAndWait(5000))
-                {
-                    /* If stashed events exist, merge them into events to be processed immediately */
-                    uint32_t pending = LORARADIO_u32ConsumePendingEvents();
-                    if (pending)
-                    {
-                        /* Merge into the current events mask so the loop processes it right away.
-                           Note: if you had local 'events' variable, OR it in; here I'm assuming you have
-                           an outer events variable the loop inspects. */
-                        events |= pending;
-                        DBG("Carrier-sense interrupted by events 0x%08X\r\n", pending);
-                        /* Re-enter RX before continuing; we'll loop and handle 'events' */
-                        LORARADIO_DRIVER_vEnterRxMode(0);
-                        continue;
-                    }
-
-                    DBG("Abort TX busy\r\n");
-                    LORARADIO_DRIVER_vEnterRxMode(0);
-                    continue;
-                }
-
-                LORARADIO_DRIVER_bTransmitPayload(pkt.buffer, pkt.length);
-
-                LORARADIO_DRIVER_vEnterRxMode(0x00);
-            }
-        }
-
         /* ---------- RX DONE ---------- */
         if (events & RADIO_EVT_RX_DONE)
         {
@@ -217,6 +180,43 @@ void LORARADIO_vRadioTask(void *arg)
             DBG("TX DONE\r\n");
             SUBGRF_ClearIrqStatus(IRQ_TX_DONE);
             LORARADIO_DRIVER_vEnterRxMode(0);
+        }
+
+        /* ---------- TX REQUEST ---------- */
+        if (events & RADIO_EVT_TX_PENDING ||
+            uxQueueMessagesWaiting(xLoRaTxQueue))
+        {
+            while (xQueueReceive(xLoRaTxQueue, &pkt, 0) == pdPASS)
+            {
+                uint8_t crc = LORARADIO_u8CRC8_Calculate(pkt.buffer, pkt.length);
+                pkt.buffer[pkt.length++] = crc;
+
+                /* inside radio task when handling a TX attempt */
+                if (!LORARADIO_bCarrierSenseAndWait(5000))
+                {
+                    /* If stashed events exist, merge them into events to be processed immediately */
+                    uint32_t pending = LORARADIO_u32ConsumePendingEvents();
+                    if (pending)
+                    {
+                        /* Merge into the current events mask so the loop processes it right away.
+                           Note: if you had local 'events' variable, OR it in; here I'm assuming you have
+                           an outer events variable the loop inspects. */
+                        events |= pending;
+                        DBG("Carrier-sense interrupted by events 0x%08X\r\n", pending);
+                        /* Re-enter RX before continuing; we'll loop and handle 'events' */
+                        LORARADIO_DRIVER_vEnterRxMode(0);
+                        continue;
+                    }
+
+                    DBG("Abort TX busy\r\n");
+                    LORARADIO_DRIVER_vEnterRxMode(0);
+                    continue;
+                }
+
+                LORARADIO_DRIVER_bTransmitPayload(pkt.buffer, pkt.length);
+
+                LORARADIO_DRIVER_vEnterRxMode(0x00);
+            }
         }
 
     }

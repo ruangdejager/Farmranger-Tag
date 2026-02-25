@@ -354,7 +354,7 @@ bool FARMRANGER_bLogData(MeshDiscoveredNeighbor_t *neighbors, uint16_t count)
 {
 
     // 1. Build CSV-style payload
-    static char logBuffer[4096];   // fits ~ 250 entries easily
+    static char logBuffer[2048];   // fits ~ 250 entries easily
     size_t pos = 0;
 
     for (uint16_t i = 0; i < count; i++)
@@ -402,6 +402,7 @@ bool FARMRANGER_bLogData(MeshDiscoveredNeighbor_t *neighbors, uint16_t count)
             DBG("UART TX timeout\r\n");
             return false;
         }
+
     }
 
     // 4. Now wait for final OK

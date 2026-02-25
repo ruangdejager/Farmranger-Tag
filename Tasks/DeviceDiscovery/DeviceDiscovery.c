@@ -225,7 +225,7 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 			// -----------------------------------------------------------------
 			if (DEVICE_DISCOVERY_DRIVER_bConnectLogger())
 			{
-				BSP_LED_On(LED_GREEN);
+//				BSP_LED_On(LED_GREEN);
 			}
 
 			DBG("DeviceDiscovery %X: Logger connected.\r\n",
@@ -256,7 +256,7 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 			}
 
 			DEVICE_DISCOVERY_DRIVER_vDisconnectLogger();
-			BSP_LED_Off(LED_GREEN);
+//			BSP_LED_Off(LED_GREEN);
 #endif
 
 			/* Discovery finished: send TimeSync */
@@ -294,8 +294,6 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 	        DBG("\r\n\r\n*---MPPT---\r\n");
 	        DBG("*Mppt chg level times (These are reset at ToD change) :\r\n");
 	        DBG("*Mppt OFF = %us\r\n", MPPTCHG_u32GetOffMpptCounter());
-	        DBG("*Mppt at 5mA = %us\r\n", MPPTCHG_u32Get5mAMpptCounter());
-	        DBG("*Mppt at 10mA = %us\r\n", MPPTCHG_u32Get10mAMpptCounter());
 	        DBG("*Mppt at 15mA = %us\r\n", MPPTCHG_u32Get15mAMpptCounter());
 	        DBG("*Mppt at 20mA = %us\r\n", MPPTCHG_u32Get20mAMpptCounter());
 	    	DBG("*Mppt at 25mA = %us\r\n", MPPTCHG_u32Get25mAMpptCounter());

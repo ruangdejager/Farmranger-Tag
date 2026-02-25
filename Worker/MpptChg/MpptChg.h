@@ -40,8 +40,6 @@ void MPPTCHG_vPinChangeCallback(void);
 
 void MPPTCHG_vIncMpptStateCounters(void);
 uint32_t MPPTCHG_u32GetOffMpptCounter(void);
-uint32_t MPPTCHG_u32Get5mAMpptCounter(void);
-uint32_t MPPTCHG_u32Get10mAMpptCounter(void);
 uint32_t MPPTCHG_u32Get15mAMpptCounter(void);
 uint32_t MPPTCHG_u32Get20mAMpptCounter(void);
 uint32_t MPPTCHG_u32Get25mAMpptCounter(void);
