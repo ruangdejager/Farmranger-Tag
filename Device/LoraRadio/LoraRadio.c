@@ -92,7 +92,7 @@ void LORARADIO_vInit(void) {
 //    SUBGRF_SetTxContinuousWave();
 //    -------------------------------------------------------------------------------------
 
-    DBG("\r\nDevice ID: %X\r\n", LORARADIO_u32GetUniqueId());
+    DBG("\r\nLoraradio: Device ID %X\r\n", LORARADIO_u32GetUniqueId());
 
 }
 
@@ -108,7 +108,7 @@ bool LORARADIO_bTxPacket(LoraRadio_Packet_t * packet) {
 
     if (xQueueSend(xLoRaTxQueue, packet, 0) != pdPASS)
     {
-        DBG("TX queue full\r\n");
+        DBG("Loraradio: TX PKT queue full\r\n");
         return false;
     }
 
@@ -155,21 +155,21 @@ void LORARADIO_vRadioTask(void *arg)
         /* ---------- ERRORS ---------- */
         if (events & RADIO_EVT_CRC_ERROR)
         {
-            DBG("CRC IRQ\r\n");
+//            DBG("CRC IRQ\r\n");
             SUBGRF_ClearIrqStatus(IRQ_CRC_ERROR);
             LORARADIO_DRIVER_vEnterRxMode(0);
         }
 
         if (events & RADIO_EVT_HEADER_ERROR)
         {
-            DBG("HEADER IRQ\r\n");
+//            DBG("HEADER IRQ\r\n");
             SUBGRF_ClearIrqStatus(IRQ_HEADER_ERROR);
             LORARADIO_DRIVER_vEnterRxMode(0);
         }
 
         if (events & RADIO_EVT_TIMEOUT)
         {
-            DBG("TIMEOUT IRQ\r\n");
+//            DBG("TIMEOUT IRQ\r\n");
             SUBGRF_ClearIrqStatus(IRQ_RX_TX_TIMEOUT);
             LORARADIO_DRIVER_vEnterRxMode(0);
         }
@@ -177,7 +177,7 @@ void LORARADIO_vRadioTask(void *arg)
         /* ---------- TX DONE ---------- */
         if (events & RADIO_EVT_TX_DONE)
         {
-            DBG("TX DONE\r\n");
+//            DBG("TX DONE\r\n");
             SUBGRF_ClearIrqStatus(IRQ_TX_DONE);
             LORARADIO_DRIVER_vEnterRxMode(0);
         }
@@ -202,13 +202,13 @@ void LORARADIO_vRadioTask(void *arg)
                            Note: if you had local 'events' variable, OR it in; here I'm assuming you have
                            an outer events variable the loop inspects. */
                         events |= pending;
-                        DBG("Carrier-sense interrupted by events 0x%08X\r\n", pending);
+                        DBG("Loraradio: TX REQ Carrier-sense interrupted by events 0x%08X\r\n", pending);
                         /* Re-enter RX before continuing; we'll loop and handle 'events' */
                         LORARADIO_DRIVER_vEnterRxMode(0);
                         continue;
                     }
 
-                    DBG("Abort TX busy\r\n");
+                    DBG("Loraradio: TX REQ Abort TX busy\r\n");
                     LORARADIO_DRIVER_vEnterRxMode(0);
                     continue;
                 }
@@ -221,104 +221,6 @@ void LORARADIO_vRadioTask(void *arg)
 
     }
 }
-
-//void LORARADIO_vRxTask(void *parameters)
-//{
-//
-//    LoraRadio_Packet_t rx_packet;
-//
-//	for (;;)
-//	{
-//		// Wait indefinitely for an RX ISR on the LORA radio
-////		uint32_t ulCount = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-//
-//		uint32_t flags;
-//		xTaskNotifyWait(0, ULONG_MAX, &flags, portMAX_DELAY);
-//
-//		if (flags & LORA_EVT_RX_DONE)
-//		{
-//		    DBG("[RADIO] RX_DONE\r\n");
-//
-//			// If the ulCount is greater than one, we received an RX ISR while we weren't ready for it and
-//			// probably lost it
-////			if (ulCount > 1)
-////			{
-////				// RX ISR before done with SUBGHZ buf read
-////			}
-//
-//			memset(&rx_packet, 0, sizeof(LoraRadio_Packet_t));
-//			LORARADIO_DRIVER_bReceivePayload(&rx_packet);
-//
-//		    uint8_t received_crc = rx_packet.buffer[rx_packet.length-1];
-//		    uint8_t calculated_crc = LORARADIO_u8CRC8_Calculate((uint8_t*)rx_packet.buffer, rx_packet.length-1);
-//
-//		    if (calculated_crc != received_crc) {
-//		        DBG("LoraRadio: CRC Mismatch! Calculated: 0x%02X, Received: 0x%02X\r\n",
-//		               calculated_crc, received_crc);
-//		        // Re-enter RX before continuing
-//		    	LORARADIO_DRIVER_vEnterRxMode(0x00);
-//		        continue;
-//		    }
-//		    // Decrement packet length to remove crc index
-//		    rx_packet.length--;
-//	    	if (xQueueSend(xLoRaRxQueue, &rx_packet, pdMS_TO_TICKS(100)) != pdPASS) {
-//	    	    // handle send failure
-//	    		// Maybe keep track of a bitmasked error code
-//	    		DBG("LoraRadio: RX queue full, dropping packet\r\n");
-//	    	} else {
-//
-//	    	}
-//
-//	    	// Now we re-enter RX listening mode
-//	    	LORARADIO_DRIVER_vEnterRxMode(0x00);
-//
-//		}
-//
-//
-//	}
-//
-//	vTaskDelete(NULL);
-//}
-//
-//void LORARADIO_vTxTask(void *parameters)
-//{
-//
-//	LoraRadio_Packet_t tx_packet;
-//
-//	for (;;)
-//	{
-//
-//		if (xQueueReceive(xLoRaTxQueue, &tx_packet, portMAX_DELAY) == pdPASS)
-//		{
-//
-//			uint8_t calculated_crc = LORARADIO_u8CRC8_Calculate((uint8_t*)tx_packet.buffer, tx_packet.length);
-//			tx_packet.buffer[tx_packet.length] = calculated_crc;
-//			tx_packet.length++;
-//
-//			if (!LORARADIO_bCarrierSenseAndWait(5000)) // 5 seconds max wait
-//			{
-//			    DBG("Abort TX: channel busy too long\r\n");
-//			    LORARADIO_DRIVER_vEnterRxMode(0x00);
-//			    continue; // Skip this packet
-//			}
-//
-//			if (LORARADIO_DRIVER_bTransmitPayload(tx_packet.buffer, tx_packet.length))
-//			{
-//				// We got the TX_DONE interrupt and the TX was successful
-//				DBG("TX IRQ: len=%d\r\n", tx_packet.length);
-//			} else {
-//				DBG("LoraRadio: Failed to transmit payload\r\n");
-//				// No TX_DONE interrupt, the freertos notification timeout triggered
-//			}
-//
-//			LORARADIO_DRIVER_vEnterRxMode(0x00);
-//
-//		}
-//
-//	}
-//
-//	vTaskDelete(NULL);
-//}
 
 uint32_t LORARADIO_u32GetUniqueId (void)
 {
@@ -402,12 +304,12 @@ bool LORARADIO_bCarrierSense(void)
         /* If CAD result, handle normally */
         if (notifyValue & RADIO_EVT_CAD_BUSY)
         {
-            DBG("CAD: Channel busy\r\n");
+            DBG("Loraradio: CAD Channel busy\r\n");
             return false;
         }
         else if (notifyValue & RADIO_EVT_CAD_CLEAR)
         {
-            DBG("CAD: Channel clear\r\n");
+            DBG("Loraradio: CAD Channel clear\r\n");
             return true;
         }
         else
@@ -419,7 +321,7 @@ bool LORARADIO_bCarrierSense(void)
         }
     }
 
-    DBG("CAD: Timeout, assuming channel busy\r\n");
+    DBG("Loraradio: CAD Timeout, assuming channel busy\r\n");
     return false; /* Fail-safe if no response */
 }
 
@@ -457,7 +359,7 @@ bool LORARADIO_bCarrierSenseAndWait(uint32_t maxWaitMs)
             CAD_BASE_BACKOFF_MS +
             (LORARADIO_u32GetRandomNumber(window - CAD_BASE_BACKOFF_MS + 1));
 
-        DBG("CAD: Adaptive backoff %lu ms (fail=%lu)\r\n",
+        DBG("Loraradio: CAD Adaptive backoff %lu ms (fail=%lu)\r\n",
             backoffMs,
             failCount);
 
@@ -481,7 +383,7 @@ bool LORARADIO_bCarrierSenseAndWait(uint32_t maxWaitMs)
         failCount++;
     }
 
-    DBG("CAD: Carrier sense timed out after %lu ms\r\n", maxWaitMs);
+    DBG("Loraradio: CAD Carrier sense timed out after %lu ms\r\n", maxWaitMs);
     return false;
 }
 
