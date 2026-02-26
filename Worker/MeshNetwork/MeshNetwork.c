@@ -95,7 +95,6 @@ static bool MESHNETWORK_bSendPacket(const uint8_t *pBuf, size_t u32Len);
 static void MESHNETWORK_vStartBeaconing(uint32_t u32DreqId, uint8_t u8HopCount);
 static void MESHNETWORK_vStopBeaconing(uint32_t u32DreqId);
 
-
 /* ------------------------------------------------------------------ */
 /* Endian helpers: on-wire is big-endian */
 static void write_u32_be(uint8_t *pBuf, uint32_t u32Val) {
@@ -183,7 +182,7 @@ static void NEIGHBOR_vClearAll(void) {
 
 /* ------------------------------------------------------------------ */
 /* Encoding helpers */
-static bool ENCODE_bDReq(uint32_t u32DreqId, uint8_t u8SenderHopCount, uint8_t *pBuf, size_t u32BufLen, size_t *pu32Written) {
+static bool MESHNETWORK_bEncodeDReq(uint32_t u32DreqId, uint8_t u8SenderHopCount, uint8_t *pBuf, size_t u32BufLen, size_t *pu32Written) {
     if (u32BufLen < 1 + 4 + 1) return false;
     pBuf[0] = (uint8_t)MeshPktType_DReq;
     write_u32_be(&pBuf[1], u32DreqId);
@@ -191,7 +190,7 @@ static bool ENCODE_bDReq(uint32_t u32DreqId, uint8_t u8SenderHopCount, uint8_t *
     *pu32Written = 6;
     return true;
 }
-static bool ENCODE_bDBeacon(const MeshPktDBeacon_t *ptBeacon, uint8_t *pBuf, size_t u32BufLen, size_t *pu32Written) {
+static bool MESHNETWORK_bEncodeDBeacon(const MeshPktDBeacon_t *ptBeacon, uint8_t *pBuf, size_t u32BufLen, size_t *pu32Written) {
     if (u32BufLen < 14) return false;
     pBuf[0] = (uint8_t)MeshPktType_DBeacon;
     write_u32_be(&pBuf[1],  ptBeacon->u32DreqId);
@@ -203,18 +202,20 @@ static bool ENCODE_bDBeacon(const MeshPktDBeacon_t *ptBeacon, uint8_t *pBuf, siz
     return true;
 }
 
-static bool ENCODE_bDAck(const MeshPktDAck_t *ptAck, uint8_t *pBuf, size_t u32BufLen, size_t *pu32Written) {
+static bool MESHNETWORK_bEncodeDAck(const MeshPktDAck_t *ptAck, uint8_t *pBuf, size_t u32BufLen, size_t *pu32Written) {
     size_t u32Needed = 1 + 4 + 4 + 1 + (4 * ptAck->u8AckCount);
     if (u32BufLen < u32Needed) return false;
     pBuf[0] = (uint8_t)MeshPktType_DAck;
     write_u32_be(&pBuf[1], ptAck->u32AckMsgId);
     write_u32_be(&pBuf[5], ptAck->u32DreqId);
     pBuf[9] = ptAck->u8AckCount;
-    for (uint8_t i=0;i<ptAck->u8AckCount;i++) write_u32_be(&pBuf[10 + 4*i], ptAck->u32AckedIds[i]);
+    for (uint8_t i=0;i<ptAck->u8AckCount;i++) {
+    	write_u32_be(&pBuf[10 + 4*i], ptAck->u32AckedIds[i]);
+    }
     *pu32Written = u32Needed;
     return true;
 }
-static bool ENCODE_bTimeSync(const MeshPktTimeSync_t *ptTS, uint8_t *pBuf, size_t u32BufLen, size_t *pu32Written) {
+static bool MESHNETWORK_bEncodeTimeSync(const MeshPktTimeSync_t *ptTS, uint8_t *pBuf, size_t u32BufLen, size_t *pu32Written) {
     if (u32BufLen < 1 + 4 + 1) return false;
     pBuf[0] = (uint8_t)MeshPktType_TimeSync;
     write_u32_be(&pBuf[1], ptTS->u32UtcTimestamp);
@@ -225,7 +226,7 @@ static bool ENCODE_bTimeSync(const MeshPktTimeSync_t *ptTS, uint8_t *pBuf, size_
 
 /* ------------------------------------------------------------------ */
 /* TX helper */
-static bool TX_bSendRaw(const uint8_t *pBuf, size_t u32Len) {
+static bool MESHNETWORK_bTxSendRaw(const uint8_t *pBuf, size_t u32Len) {
     LoraRadio_Packet_t tTx;
     memset(&tTx,0,sizeof(tTx));
     if (u32Len > sizeof(tTx.buffer)) return false;
@@ -256,7 +257,7 @@ static void MESHNETWORK_vBeaconTimerCallback(TimerHandle_t xTimer) {
     DBG("MeshNetwork: Sending Beacon %08X\r\n", tBeacon.u32BeaconMsgId);
 
     uint8_t u8Buf[64]; size_t u32Len=0;
-    if (!ENCODE_bDBeacon(&tBeacon, u8Buf, sizeof(u8Buf), &u32Len)) return;
+    if (!MESHNETWORK_bEncodeDBeacon(&tBeacon, u8Buf, sizeof(u8Buf), &u32Len)) return;
     FORWARD_vAdd(tBeacon.u32BeaconMsgId); /* avoid forwarding own beacon */
     MESHNETWORK_bSendPacket(u8Buf, u32Len);
 }
@@ -281,7 +282,7 @@ static void MESHNETWORK_vPrimaryAckTimerCallback(TimerHandle_t xTimer) {
 
         if (tAck.u8AckCount > 0) {
             uint8_t u8Buf[128]; size_t u32Len=0;
-            if (ENCODE_bDAck(&tAck, u8Buf, sizeof(u8Buf), &u32Len)) {
+            if (MESHNETWORK_bEncodeDAck(&tAck, u8Buf, sizeof(u8Buf), &u32Len)) {
                 FORWARD_vAdd(tAck.u32AckMsgId);
                 MESHNETWORK_bSendPacket(u8Buf, u32Len);
             }
@@ -326,7 +327,7 @@ static bool MESHNETWORK_bSendPacket(const uint8_t *pBuf,
 /* ------------------------------------------------------------------ */
 /* Incoming packet handlers */
 static void MESHNETWORK_vHandleDReq(const uint8_t *pBuf, size_t u32Len, int16_t s16Rssi) {
-    if (u32Len < 14) return;
+    if (u32Len < 6) return;
     uint32_t u32DreqId = read_u32_be(&pBuf[1]);
     uint32_t u32OriginId = u32DreqId >> 16;
     uint8_t u8SenderHopCount = pBuf[5];
@@ -344,7 +345,7 @@ static void MESHNETWORK_vHandleDReq(const uint8_t *pBuf, size_t u32Len, int16_t 
     if (eNodeRole == NODE_ROLE_FORWARDER) {
         if (!FORWARD_bHasSeen(u32DreqId)) {
             uint8_t u8Out[32]; size_t u32OutLen=0;
-            if (ENCODE_bDReq(u32DreqId, (uint8_t)(u8SenderHopCount + 1), u8Out, sizeof(u8Out), &u32OutLen)) {
+            if (MESHNETWORK_bEncodeDReq(u32DreqId, (uint8_t)(u8SenderHopCount + 1), u8Out, sizeof(u8Out), &u32OutLen)) {
                 FORWARD_vAdd(u32DreqId);
                 MESHNETWORK_bSendPacket(u8Out, u32OutLen);
                 DBG("MeshNetwork: DReq forwarded\r\n");
@@ -417,7 +418,7 @@ static void MESHNETWORK_vHandleDBeacon(const uint8_t *pBuf,
     uint8_t u8Buf[64];
     size_t u32TempLen = 0;
 
-    if (!ENCODE_bDBeacon(&tBeacon, u8Buf, sizeof(u8Buf), &u32TempLen))
+    if (!MESHNETWORK_bEncodeDBeacon(&tBeacon, u8Buf, sizeof(u8Buf), &u32TempLen))
     {
         return;
     }
@@ -499,20 +500,41 @@ static void MESHNETWORK_vHandleTimeSync(const uint8_t *pBuf, size_t u32Len, int1
 /* ------------------------------------------------------------------ */
 /* Parser task */
 void MESHNETWORK_vParserTask(void *pvParameters) {
+
     (void)pvParameters;
     LoraRadio_Packet_t tRx;
+
     for (;;) {
-        if (!LORARADIO_bRxPacket(&tRx)) { vTaskDelay(pdMS_TO_TICKS(5)); continue; }
+
+        if (!LORARADIO_bRxPacket(&tRx))
+        {
+        	vTaskDelay(pdMS_TO_TICKS(5));
+        	continue;
+        }
+
         if (tRx.length < 1) continue;
         MeshPktType_e eType = (MeshPktType_e)tRx.buffer[0];
         switch (eType) {
-            case MeshPktType_DReq: MESHNETWORK_vHandleDReq(tRx.buffer, tRx.length, tRx.rssi); break;
-            case MeshPktType_DBeacon: MESHNETWORK_vHandleDBeacon(tRx.buffer, tRx.length, tRx.rssi); break;
-            case MeshPktType_DAck: MESHNETWORK_vHandleDAck(tRx.buffer, tRx.length, tRx.rssi); break;
-            case MeshPktType_TimeSync: MESHNETWORK_vHandleTimeSync(tRx.buffer, tRx.length, tRx.rssi); break;
-            default: DBG("MeshNetwork: Unknown mesh pkt type %u\r\n", tRx.buffer[0]); break;
+            case MeshPktType_DReq:
+            	MESHNETWORK_vHandleDReq(tRx.buffer, tRx.length, tRx.rssi);
+            	break;
+            case MeshPktType_DBeacon:
+            	MESHNETWORK_vHandleDBeacon(tRx.buffer, tRx.length, tRx.rssi);
+            	break;
+            case MeshPktType_DAck:
+            	MESHNETWORK_vHandleDAck(tRx.buffer, tRx.length, tRx.rssi);
+            	break;
+            case MeshPktType_TimeSync:
+            	MESHNETWORK_vHandleTimeSync(tRx.buffer, tRx.length, tRx.rssi);
+            	break;
+            default:
+            	DBG("MeshNetwork: Unknown mesh pkt type %u\r\n", tRx.buffer[0]);
+            	break;
+
         }
+
     }
+
 }
 
 static void MESHNETWORK_vTxTask(void *pvParameters)
@@ -535,7 +557,7 @@ static void MESHNETWORK_vTxTask(void *pvParameters)
 
             DBG("MeshNetwork: TX (len=%u)\r\n",
                 tItem.u16Len);
-            TX_bSendRaw(tItem.u8Buf, tItem.u16Len);
+            MESHNETWORK_bTxSendRaw(tItem.u8Buf, tItem.u16Len);
         }
     }
 }
@@ -614,7 +636,7 @@ bool MESHNETWORK_bStartDiscoveryRound(uint32_t u32DreqId)
     uint8_t u8Out[32];
     size_t u32Len = 0;
 
-    if (!ENCODE_bDReq(u32DreqId,
+    if (!MESHNETWORK_bEncodeDReq(u32DreqId,
                       0,                           /* hop count */
                       u8Out,
                       sizeof(u8Out),
@@ -645,7 +667,7 @@ void MESHNETWORK_vSendTimeSync(uint32_t u32UtcTimestamp,
     uint8_t u8Buf[16];
     size_t u32Len = 0;
 
-    if (!ENCODE_bTimeSync(&tTs, u8Buf, sizeof(u8Buf), &u32Len)) {
+    if (!MESHNETWORK_bEncodeTimeSync(&tTs, u8Buf, sizeof(u8Buf), &u32Len)) {
         return;
     }
 
@@ -681,17 +703,26 @@ static void MESHNETWORK_vStopBeaconing(uint32_t u32DreqId) {
 }
 
 bool MESHNETWORK_bGetDiscoveredNeighbors(MeshDiscoveredNeighbor_t *pBuffer, uint16_t u16MaxEntries, uint16_t *pu16ActualEntries) {
-    if (xSemaphoreTake(xNeighborTableMutex, pdMS_TO_TICKS(200)) != pdTRUE) { *pu16ActualEntries = 0; return false; }
+
+    if (xSemaphoreTake(xNeighborTableMutex, pdMS_TO_TICKS(200)) != pdTRUE)
+    {
+    	*pu16ActualEntries = 0;
+    	return false;
+    }
+
     uint16_t u16Count = (u16NeighborCount < u16MaxEntries) ? u16NeighborCount : u16MaxEntries;
+
     for (uint16_t i=0;i<u16Count;i++) {
         pBuffer[i].u32DeviceId = tNeighborTable[i].u32DeviceId;
         pBuffer[i].u8HopCount  = tNeighborTable[i].u8HopCount;
         pBuffer[i].i16Rssi     = tNeighborTable[i].i16Rssi;
         pBuffer[i].u16BatMv    = tNeighborTable[i].u16BatMv;
     }
+
     *pu16ActualEntries = u16Count;
     xSemaphoreGive(xNeighborTableMutex);
     return true;
+
 }
 
 void MESHNETWORK_vClearDiscoveredNeighbors(void)
