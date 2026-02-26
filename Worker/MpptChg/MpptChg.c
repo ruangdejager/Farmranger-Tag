@@ -35,14 +35,14 @@ TaskHandle_t MPPTCHG_vMpptTask_handle;
 volatile bool PgStateChange;
 
 uint32_t u32mpptOffCntr;
-uint32_t u32mppt5mACntr;
-uint32_t u32mppt10mACntr;
 uint32_t u32mppt15mACntr;
 uint32_t u32mppt20mACntr;
 uint32_t u32mppt25mACntr;
 uint32_t u32mppt30mACntr;
 uint32_t u32mppt35mACntr;
 uint32_t u32mppt40mACntr;
+uint32_t u32mppt45mACntr;
+uint32_t u32mppt50mACntr;
 
 chg_pg_state_t PgState;
 bool bPgInitFlag = false;
@@ -319,6 +319,24 @@ void MPPTCHG_vUpdateMpptState(chg_mppt_bump_t tMpptBump)
 			{
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_35mA);
 			}
+			if (tMpptBump == CHG_BUMP_MPPT_UP) {
+				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_45mA);
+			}
+			break;
+		case CHG_SEL_MPPT_45mA:
+			if (tMpptBump == CHG_BUMP_MPPT_DOWN)
+			{
+				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_40mA);
+			}
+			if (tMpptBump == CHG_BUMP_MPPT_UP) {
+				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_50mA);
+			}
+			break;
+		case CHG_SEL_MPPT_50mA:
+			if (tMpptBump == CHG_BUMP_MPPT_DOWN)
+			{
+				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_45mA);
+			}
 			if (tMpptBump == CHG_BUMP_MPPT_UP) return;
 			break;
 		default:
@@ -365,6 +383,16 @@ void MPPTCHG_vSetMpptChgLevel(chg_mppt_state_t tMpptChgLevelSet)
 			tMpptState = CHG_SEL_MPPT_40mA;
 			MPPTCHG_DRIVER_vSetMppt40mA();
 			DBG("\r\nMPPT SET: 40mA\r\n");
+			break;
+		case CHG_SEL_MPPT_45mA:
+			tMpptState = CHG_SEL_MPPT_45mA;
+			MPPTCHG_DRIVER_vSetMppt45mA();
+			DBG("\r\nMPPT SET: 45mA\r\n");
+			break;
+		case CHG_SEL_MPPT_50mA:
+			tMpptState = CHG_SEL_MPPT_50mA;
+			MPPTCHG_DRIVER_vSetMppt50mA();
+			DBG("\r\nMPPT SET: 50mA\r\n");
 			break;
 		default:
 			break;
@@ -416,6 +444,12 @@ void MPPTCHG_vIncMpptStateCounters(void)
 		case CHG_SEL_MPPT_40mA:
 			u32mppt40mACntr++;
 			break;
+		case CHG_SEL_MPPT_45mA:
+			u32mppt45mACntr++;
+			break;
+		case CHG_SEL_MPPT_50mA:
+			u32mppt50mACntr++;
+			break;
 		default:
 			break;
 	}
@@ -424,14 +458,14 @@ void MPPTCHG_vIncMpptStateCounters(void)
 void MPPTCHG_vClearMpptStateCounters(void)
 {
 	u32mpptOffCntr = 0;
-	u32mppt5mACntr = 0;
-	u32mppt10mACntr = 0;
 	u32mppt15mACntr = 0;
 	u32mppt20mACntr = 0;
 	u32mppt25mACntr = 0;
 	u32mppt30mACntr = 0;
 	u32mppt35mACntr = 0;
 	u32mppt40mACntr = 0;
+	u32mppt45mACntr = 0;
+	u32mppt50mACntr = 0;
 }
 
 uint32_t MPPTCHG_u32GetOffMpptCounter(void)
@@ -467,5 +501,15 @@ uint32_t MPPTCHG_u32Get35mAMpptCounter(void)
 uint32_t MPPTCHG_u32Get40mAMpptCounter(void)
 {
 	return u32mppt40mACntr;
+}
+
+uint32_t MPPTCHG_u32Get45mAMpptCounter(void)
+{
+	return u32mppt45mACntr;
+}
+
+uint32_t MPPTCHG_u32Get50mAMpptCounter(void)
+{
+	return u32mppt50mACntr;
 }
 

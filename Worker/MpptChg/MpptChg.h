@@ -18,7 +18,9 @@ typedef enum chg_mppt_state_t {
 	CHG_SEL_MPPT_25mA,
 	CHG_SEL_MPPT_30mA,
 	CHG_SEL_MPPT_35mA,
-	CHG_SEL_MPPT_40mA
+	CHG_SEL_MPPT_40mA,
+	CHG_SEL_MPPT_45mA,
+	CHG_SEL_MPPT_50mA
 } chg_mppt_state_t;
 
 typedef enum chg_mppt_bump_t {
@@ -46,6 +48,8 @@ uint32_t MPPTCHG_u32Get25mAMpptCounter(void);
 uint32_t MPPTCHG_u32Get30mAMpptCounter(void);
 uint32_t MPPTCHG_u32Get35mAMpptCounter(void);
 uint32_t MPPTCHG_u32Get40mAMpptCounter(void);
+uint32_t MPPTCHG_u32Get45mAMpptCounter(void);
+uint32_t MPPTCHG_u32Get50mAMpptCounter(void);
 void MPPTCHG_vClearMpptStateCounters(void);
 
 #endif /* WORKER_MPPTCHG_MPPTCHG_H_ */
