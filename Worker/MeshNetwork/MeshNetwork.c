@@ -183,38 +183,34 @@ static void NEIGHBOR_vClearAll(void) {
 
 /* ------------------------------------------------------------------ */
 /* Encoding helpers */
-static bool ENCODE_bDReq(uint32_t u32DreqId, uint32_t u32OriginId, uint32_t u32SenderId, uint8_t u8SenderHopCount, uint8_t *pBuf, size_t u32BufLen, size_t *pu32Written) {
-    if (u32BufLen < 1 + 4 + 4 + 4 + 1) return false;
+static bool ENCODE_bDReq(uint32_t u32DreqId, uint8_t u8SenderHopCount, uint8_t *pBuf, size_t u32BufLen, size_t *pu32Written) {
+    if (u32BufLen < 1 + 4 + 1) return false;
     pBuf[0] = (uint8_t)MeshPktType_DReq;
     write_u32_be(&pBuf[1], u32DreqId);
-    write_u32_be(&pBuf[5], u32OriginId);
-    write_u32_be(&pBuf[9], u32SenderId);
-    pBuf[13] = u8SenderHopCount;
-    *pu32Written = 14;
+    pBuf[5] = u8SenderHopCount;
+    *pu32Written = 6;
     return true;
 }
 static bool ENCODE_bDBeacon(const MeshPktDBeacon_t *ptBeacon, uint8_t *pBuf, size_t u32BufLen, size_t *pu32Written) {
-    if (u32BufLen < 18) return false;
+    if (u32BufLen < 14) return false;
     pBuf[0] = (uint8_t)MeshPktType_DBeacon;
     write_u32_be(&pBuf[1],  ptBeacon->u32DreqId);
-    write_u32_be(&pBuf[5],  ptBeacon->u32DeviceId);
-    write_u16_be(&pBuf[9],  ptBeacon->u16BatMv);
-    pBuf[11] = ptBeacon->u8HopCount;
-    write_s16_be(&pBuf[12], ptBeacon->i16Rssi);
-    write_u32_be(&pBuf[14], ptBeacon->u32BeaconMsgId);
-    *pu32Written = 18;
+    write_u16_be(&pBuf[5],  ptBeacon->u16BatMv);
+    pBuf[7] = ptBeacon->u8HopCount;
+    write_s16_be(&pBuf[8], ptBeacon->i16Rssi);
+    write_u32_be(&pBuf[10], ptBeacon->u32BeaconMsgId);
+    *pu32Written = 14;
     return true;
 }
 
 static bool ENCODE_bDAck(const MeshPktDAck_t *ptAck, uint8_t *pBuf, size_t u32BufLen, size_t *pu32Written) {
-    size_t u32Needed = 1 + 4 + 4 + 4 + 1 + (4 * ptAck->u8AckCount);
+    size_t u32Needed = 1 + 4 + 4 + 1 + (4 * ptAck->u8AckCount);
     if (u32BufLen < u32Needed) return false;
     pBuf[0] = (uint8_t)MeshPktType_DAck;
     write_u32_be(&pBuf[1], ptAck->u32AckMsgId);
     write_u32_be(&pBuf[5], ptAck->u32DreqId);
-    write_u32_be(&pBuf[9], ptAck->u32SenderId);
-    pBuf[13] = ptAck->u8AckCount;
-    for (uint8_t i=0;i<ptAck->u8AckCount;i++) write_u32_be(&pBuf[14 + 4*i], ptAck->u32AckedIds[i]);
+    pBuf[9] = ptAck->u8AckCount;
+    for (uint8_t i=0;i<ptAck->u8AckCount;i++) write_u32_be(&pBuf[10 + 4*i], ptAck->u32AckedIds[i]);
     *pu32Written = u32Needed;
     return true;
 }
@@ -251,7 +247,7 @@ static void MESHNETWORK_vBeaconTimerCallback(TimerHandle_t xTimer) {
     if (!bNodeBeaconing) return;
     MeshPktDBeacon_t tBeacon;
     tBeacon.u32DreqId = u32NodeBeaconDreqId;
-    tBeacon.u32DeviceId = LORARADIO_u32GetUniqueId();
+    tBeacon.u32DeviceId = 0; // We do not encode this value, it is derived from beaconMsgId in handleBeacon
     tBeacon.u16BatMv = BAT_u16GetVoltage();
     tBeacon.u8HopCount = u8NodeHopCount;
     tBeacon.i16Rssi = i16LastDreqRssi;
@@ -332,12 +328,11 @@ static bool MESHNETWORK_bSendPacket(const uint8_t *pBuf,
 static void MESHNETWORK_vHandleDReq(const uint8_t *pBuf, size_t u32Len, int16_t s16Rssi) {
     if (u32Len < 14) return;
     uint32_t u32DreqId = read_u32_be(&pBuf[1]);
-    uint32_t u32OriginId = read_u32_be(&pBuf[5]);
-    uint32_t u32SenderId = read_u32_be(&pBuf[9]);
-    uint8_t u8SenderHopCount = pBuf[13];
+    uint32_t u32OriginId = u32DreqId >> 16;
+    uint8_t u8SenderHopCount = pBuf[5];
 
-    DBG("MeshNetwork: DReq received: dreq=%08X origin=%04X sender=%04X hop=%u rssi=%d\r\n",
-    		u32DreqId, u32OriginId, u32SenderId, u8SenderHopCount, s16Rssi);
+    DBG("MeshNetwork: DReq received: dreq=%08X origin=%04X hop=%u rssi=%d\r\n",
+    		u32DreqId, u32OriginId, u8SenderHopCount, s16Rssi);
 
     /* Capture RSSI of the received DReq */
     i16LastDreqRssi = s16Rssi;
@@ -349,7 +344,7 @@ static void MESHNETWORK_vHandleDReq(const uint8_t *pBuf, size_t u32Len, int16_t 
     if (eNodeRole == NODE_ROLE_FORWARDER) {
         if (!FORWARD_bHasSeen(u32DreqId)) {
             uint8_t u8Out[32]; size_t u32OutLen=0;
-            if (ENCODE_bDReq(u32DreqId, u32OriginId, LORARADIO_u32GetUniqueId(), (uint8_t)(u8SenderHopCount + 1), u8Out, sizeof(u8Out), &u32OutLen)) {
+            if (ENCODE_bDReq(u32DreqId, (uint8_t)(u8SenderHopCount + 1), u8Out, sizeof(u8Out), &u32OutLen)) {
                 FORWARD_vAdd(u32DreqId);
                 MESHNETWORK_bSendPacket(u8Out, u32OutLen);
                 DBG("MeshNetwork: DReq forwarded\r\n");
@@ -360,8 +355,6 @@ static void MESHNETWORK_vHandleDReq(const uint8_t *pBuf, size_t u32Len, int16_t 
     } else {
         /* non-forwarder: start beaconing */
     	MESHNETWORK_vStartBeaconing(u32DreqId, (uint8_t)(u8SenderHopCount + 1));
-    	/* Force callback to immediately fire, then wait for the beacon timer */
-//    	MESHNETWORK_vBeaconTimerCallback(xBeaconTimer);
     }
 }
 
@@ -369,15 +362,15 @@ static void MESHNETWORK_vHandleDBeacon(const uint8_t *pBuf,
                                       size_t u32Len,
                                       int16_t s16Rssi)
 {
-    if (u32Len < 18) return;
+    if (u32Len < 14) return;
 
     MeshPktDBeacon_t tBeacon;
     tBeacon.u32DreqId      = read_u32_be(&pBuf[1]);
-    tBeacon.u32DeviceId    = read_u32_be(&pBuf[5]);
-    tBeacon.u16BatMv       = read_u16_be(&pBuf[9]);
-    tBeacon.u8HopCount     = pBuf[11];
-    tBeacon.i16Rssi        = read_s16_be(&pBuf[12]);
-    tBeacon.u32BeaconMsgId = read_u32_be(&pBuf[14]);
+    tBeacon.u16BatMv       = read_u16_be(&pBuf[5]);
+    tBeacon.u8HopCount     = pBuf[7];
+    tBeacon.i16Rssi        = read_s16_be(&pBuf[8]);
+    tBeacon.u32BeaconMsgId = read_u32_be(&pBuf[10]);
+    tBeacon.u32DeviceId    = tBeacon.u32BeaconMsgId >> 16;
 
     DBG("MeshNetwork: Received Beacon: dev=%04X dreq=%08X hop=%u bat=%u rssi=%d id=%08X\r\n",
         tBeacon.u32DeviceId,
@@ -436,16 +429,15 @@ static void MESHNETWORK_vHandleDBeacon(const uint8_t *pBuf,
 
 
 static void MESHNETWORK_vHandleDAck(const uint8_t *pBuf, size_t u32Len, int16_t s16Rssi) {
-    if (u32Len < 14) return;
+    if (u32Len < 10) return;
     uint32_t u32AckMsgId = read_u32_be(&pBuf[1]);
     uint32_t u32DreqId = read_u32_be(&pBuf[5]);
-    uint32_t u32SenderId = read_u32_be(&pBuf[9]);
-    uint8_t u8AckCount = pBuf[13];
-    if (u32Len < (size_t)(14 + 4*u8AckCount)) return;
+    uint8_t u8AckCount = pBuf[9];
+    if (u32Len < (size_t)(10 + 4*u8AckCount)) return;
     uint32_t u32Ids[MESH_MAX_ACK_IDS_PER_PACKET];
-    for (uint8_t i=0;i<u8AckCount;i++) u32Ids[i] = read_u32_be(&pBuf[14 + 4*i]);
+    for (uint8_t i=0;i<u8AckCount;i++) u32Ids[i] = read_u32_be(&pBuf[10 + 4*i]);
 
-    DBG("MeshNetwork: DAck Received: ackId=%08X dreq=%08X sender=%04X count=%u\r\n", u32AckMsgId, u32DreqId, u32SenderId, u8AckCount);
+    DBG("MeshNetwork: DAck Received: ackId=%08X dreq=%08X count=%u\r\n", u32AckMsgId, u32DreqId, u8AckCount);
 
     if (FORWARD_bHasSeen(u32AckMsgId))
     {
@@ -623,8 +615,6 @@ bool MESHNETWORK_bStartDiscoveryRound(uint32_t u32DreqId)
     size_t u32Len = 0;
 
     if (!ENCODE_bDReq(u32DreqId,
-                      LORARADIO_u32GetUniqueId(),  /* origin */
-                      LORARADIO_u32GetUniqueId(),  /* sender */
                       0,                           /* hop count */
                       u8Out,
                       sizeof(u8Out),
