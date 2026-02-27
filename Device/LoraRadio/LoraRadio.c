@@ -82,7 +82,8 @@ void LORARADIO_vInit(void) {
 
     LORARADIO_DRIVER_vInit(u8DevEUI); // Initialize LoRa hardware
 
-    LORARADIO_DRIVER_vEnterRxMode(0x00); // Start listening
+//    LORARADIO_DRIVER_vEnterRxMode(0x00); // Start listening
+    LORARADIO_vEnterDeepSleep();
 
     /* Here is code to test tx output power - comment out mesh and discovery inits */
 //    -------------------------------------------------------------------------------------
