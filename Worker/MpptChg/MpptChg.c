@@ -241,10 +241,10 @@ void MPPTCHG_vMpptTask(void *pvParameters)
 				MPPTCHG_vUpdateMpptState(CHG_BUMP_MPPT_UP);
 
 				// When mppt state has been at CHG_SEL_MPPT_45mA for 5 minutes and Power is GOOD -> Enter OFF state
-				// This is a hack, we cannot get more than 36mA with the current solar panel but sometimes 0V = POWER GOOD
+#warning This is a hack, we cannot get more than 36mA with the current solar panel but sometimes 0V = POWER GOOD
 				if (tMpptState != CHG_SEL_MPPT_45mA)
 				{
-					u16MpptOffCountdownTmrCnt = 240;
+					u16MpptOffCountdownTmrCnt = 270;
 				}
 
 			}

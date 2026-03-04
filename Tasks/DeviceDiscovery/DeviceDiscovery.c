@@ -25,7 +25,7 @@
 #define APP_TASK_PRIORITY       	(configMAX_PRIORITIES - 3) // Lower priority for app logic
 #define APP_TASK_STACK_SIZE     	(configMINIMAL_STACK_SIZE * 10)
 
-#define LOST_PRIMARY_TIMEOUT_MIN    120      // ~8 hours
+#define LOST_PRIMARY_TIMEOUT_MIN    480      // ~8 hours
 
 // --- PRIVATE FREE_RTOS RESOURCES ---
 static EventGroupHandle_t xDiscoveryEventGroup;
@@ -34,6 +34,8 @@ BaseType_t status;
 
 static TaskHandle_t DeviceDiscoveryAppTask_handle;
 static TaskHandle_t DeviceDiscoveryWakeupTask_handle;
+
+uint32_t u32DreqId;
 
 static void DEVICE_DISCOVERY_vRecoveryMode(void);
 static void DEVICE_DISCOVERY_vSendTS(void);
@@ -95,6 +97,8 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 
 		/* Clear table for next campaign */
 		MESHNETWORK_vClearDiscoveredNeighbors();
+		/* Primary and secondary need to reset its waveCount for the new discovery */
+		MESHNETWORK_vResetDreqWaveCnt();
 
 		DBG("DeviceDiscovery %X: Woke up for discovery.\r\n",
 			LORARADIO_u32GetUniqueId());
@@ -106,13 +110,15 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 
 			/* Start discovery waves until silence */
 			bool bDiscoveryFinished = false;
+
 			DBG("DeviceDiscovery: Primary starting discovery campaign\r\n");
 
 			while (!bDiscoveryFinished)
 			{
-				uint32_t u32DreqId = MESHNETWORK_u32GenerateGlobalMsgID();
+				u32DreqId = MESHNETWORK_u32GenerateGlobalMsgID();
 				bool bBeaconSeenThisWave = false;
 
+				MESHNETWORK_vIncrDreqWaveCnt();
 				MESHNETWORK_bStartDiscoveryRound(u32DreqId);
 
 				TickType_t tLastBeaconTick = MESHNETWORK_tGetLastBeaconHeardTick();
@@ -185,6 +191,11 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 			        LORARADIO_u32GetUniqueId());
 		    }
 
+		    /* Here we stop beaconing in case we never received an ack;
+		     * This is a corner case but necessary to ensure a reset state
+		     */
+		    MESHNETWORK_vStopBeaconing(u32DreqId);
+
 		}
 
 		// ---------------------------------------------------------------------
@@ -206,11 +217,12 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 					LORARADIO_u32GetUniqueId(), u16NeighborCount);
 				for (uint16_t i = 0; i < u16NeighborCount; i++)
 				{
-					DBG("  ID:%X  Hops:%X  RSSI:%d  Bat:%d\r\n",
+					DBG("  ID:%X  Hops:%X  RSSI:%d  Bat:%d  Wave:%d\r\n",
 							tNeighbors[i].u32DeviceId,
 							tNeighbors[i].u8HopCount,
 							tNeighbors[i].i16Rssi,
-							tNeighbors[i].u16BatMv);
+							tNeighbors[i].u16BatMv,
+							tNeighbors[i].u8Wave);
 				}
 			}
 			else

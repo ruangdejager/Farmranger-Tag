@@ -65,6 +65,7 @@ typedef struct {
     uint8_t  u8HopCount;        /* hops from origin */
     int16_t  i16Rssi;           /* RSSI of received DReq */
     uint32_t u32BeaconMsgId;    /* globally unique beacon id */
+    uint8_t dreqWaveDisc;		/* wave the device started beaconing */
 } MeshPktDBeacon_t;
 
 /* DAck: primary ack list */
@@ -96,6 +97,7 @@ typedef struct {
     uint8_t  u8HopCount;
     int16_t i16Rssi;
     uint16_t u16BatMv;
+    uint8_t u8DreqWaveDiscovered;
     bool     bAcked;   /* true if primary has acked this device */
 } NeighborEntry_t;
 
@@ -119,6 +121,7 @@ typedef struct {
     uint8_t  u8HopCount;
     int16_t i16Rssi;
     uint16_t u16BatMv;
+    uint8_t u8Wave;
 } MeshDiscoveredNeighbor_t;
 
 
@@ -132,6 +135,7 @@ void MESHNETWORK_vSendTimeSync(uint32_t u32UtcTimestamp,
                                WakeupInterval tWakeupInterval);
 
 /* Access neighbor table (primary) */
+void MESHNETWORK_vStopBeaconing(uint32_t u32DreqId);
 bool MESHNETWORK_bGetDiscoveredNeighbors(MeshDiscoveredNeighbor_t *pBuffer, uint16_t u16MaxEntries, uint16_t *pu16ActualEntries);
 void MESHNETWORK_vClearDiscoveredNeighbors(void);
 
@@ -153,6 +157,8 @@ void MESHNETWORK_vStartPrimaryAck(void);
 void MESHNETWORK_vStopPrimaryAck(void);
 
 void MESHNETWORK_vResetNodeRole(void);
+void MESHNETWORK_vIncrDreqWaveCnt(void);
+void MESHNETWORK_vResetDreqWaveCnt(void);
 
 
 #endif /* WORKER_MESHNETWORK_MESHNETWORK_H_ */
