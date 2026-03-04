@@ -230,7 +230,7 @@ void MPPTCHG_vMpptTask(void *pvParameters)
 				// This happens in the bump down function
 				MPPTCHG_vUpdateMpptState(CHG_BUMP_MPPT_DOWN);
 				// We reset the mppt off countdown timer
-				// When mppt state has been at CHG_SEL_MPPT_5mA for 5 minutes and Power is NOT GOOD -> Enter OFF state
+				// When mppt state has been at CHG_SEL_MPPT_5mA for 15 minutes and Power is NOT GOOD -> Enter OFF state
 				if (tMpptState != CHG_SEL_MPPT_15mA)
 				{
 					u16MpptOffCountdownTmrCnt = 0;
@@ -239,6 +239,14 @@ void MPPTCHG_vMpptTask(void *pvParameters)
 			} else if (PgState == CHG_PG_STATE_LOW) {
 
 				MPPTCHG_vUpdateMpptState(CHG_BUMP_MPPT_UP);
+
+				// When mppt state has been at CHG_SEL_MPPT_45mA for 5 minutes and Power is GOOD -> Enter OFF state
+				// This is a hack, we cannot get more than 36mA with the current solar panel but sometimes 0V = POWER GOOD
+				if (tMpptState != CHG_SEL_MPPT_45mA)
+				{
+					u16MpptOffCountdownTmrCnt = 240;
+				}
+
 			}
 			u8MpptTmrCnt = 0;
 
@@ -328,10 +336,12 @@ void MPPTCHG_vUpdateMpptState(chg_mppt_bump_t tMpptBump)
 			{
 				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_40mA);
 			}
-			if (tMpptBump == CHG_BUMP_MPPT_UP) {
-				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_50mA);
+			if (tMpptBump == CHG_BUMP_MPPT_UP && (u16MpptOffCountdownTmrCnt >= 300) )
+			{
+				MPPTCHG_vSetMpptChgLevel(CHG_SEL_MPPT_OFF);
+				// De-Init the PG line
+				MPPTCHG_vDeinitPgPins();
 			}
-			break;
 		case CHG_SEL_MPPT_50mA:
 			if (tMpptBump == CHG_BUMP_MPPT_DOWN)
 			{
@@ -352,6 +362,7 @@ void MPPTCHG_vSetMpptChgLevel(chg_mppt_state_t tMpptChgLevelSet)
 	switch (tMpptChgLevelSet) {
 		case CHG_SEL_MPPT_OFF:
 			tMpptState = CHG_SEL_MPPT_OFF;
+			MPPTCHG_DRIVER_vSetMppt15mA();
 			DBG("\r\nMPPT SET: OFF\r\n");
 			break;
 		case CHG_SEL_MPPT_15mA:
