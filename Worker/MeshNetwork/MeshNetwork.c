@@ -59,7 +59,7 @@ static uint8_t u8NodeHopCount = 0;
 static NodeRole_e eNodeRole = NODE_ROLE_UNKNOWN;
 
 /* Wakeup interval */
-static WakeupInterval tCurrentWakeupInterval = WAKEUP_INTERVAL_60_MIN;
+static WakeupInterval tCurrentWakeupInterval = WAKEUP_INTERVAL_15_MIN;
 static const uint8_t u8CurrentWakeupIntervalMin[] = {
 [WAKEUP_INTERVAL_15_MIN] = 15,
 [WAKEUP_INTERVAL_30_MIN] = 30,
@@ -341,9 +341,6 @@ static void MESHNETWORK_vHandleDReq(const uint8_t *pBuf, size_t u32Len, int16_t 
     DBG("MeshNetwork: DReq received: dreq=%08X origin=%04X hop=%u rssi=%d\r\n",
     		u32DreqId, u32OriginId, u8SenderHopCount, s16Rssi);
 
-    /* Capture RSSI of the received DReq */
-    if (s16Rssi > i16BestDreqRssi) i16BestDreqRssi = s16Rssi;
-
     /* ignore our own rounds */
     if (u32OriginId == LORARADIO_u32GetUniqueId()) return;
 
@@ -364,6 +361,10 @@ static void MESHNETWORK_vHandleDReq(const uint8_t *pBuf, size_t u32Len, int16_t 
     	MESHNETWORK_vStartBeaconing(u32DreqId, (uint8_t)(u8SenderHopCount + 1));
     	u8PrimaryDreqWaveCnt = u8WaveCnt;
     }
+
+    /* Capture RSSI of the received DReq */
+    if ((u8PrimaryDreqWaveCnt == u8WaveCnt) && (s16Rssi > i16BestDreqRssi)) i16BestDreqRssi = s16Rssi;
+
 }
 
 static void MESHNETWORK_vHandleDBeacon(const uint8_t *pBuf,
@@ -425,18 +426,25 @@ static void MESHNETWORK_vHandleDBeacon(const uint8_t *pBuf,
     /* ---------------------------------------------------------
      * 4. SECONDARY behavior (forward exactly once)
      * --------------------------------------------------------- */
-    tBeacon.u8HopCount++;
 
-    uint8_t u8Buf[64];
-    size_t u32TempLen = 0;
+    /* forwarder behavior */
+    if (eNodeRole == NODE_ROLE_FORWARDER) {
 
-    if (!MESHNETWORK_bEncodeDBeacon(&tBeacon, u8Buf, sizeof(u8Buf), &u32TempLen))
-    {
-        return;
+        tBeacon.u8HopCount++;
+
+        uint8_t u8Buf[64];
+        size_t u32TempLen = 0;
+
+        if (!MESHNETWORK_bEncodeDBeacon(&tBeacon, u8Buf, sizeof(u8Buf), &u32TempLen))
+        {
+            return;
+        }
+
+        MESHNETWORK_bSendPacket(u8Buf, u32TempLen);
+        DBG("MeshNetwork: Forwarding Beacon\r\n");
+
     }
 
-    MESHNETWORK_bSendPacket(u8Buf, u32TempLen);
-    DBG("MeshNetwork: Forwarding Beacon\r\n");
 }
 
 
@@ -468,8 +476,13 @@ static void MESHNETWORK_vHandleDAck(const uint8_t *pBuf, size_t u32Len, int16_t 
         }
     }
 
-    MESHNETWORK_bSendPacket(pBuf, u32Len);
-    DBG("MeshNetwork: Ack forwarded\r\n");
+    /* forwarder behavior */
+    if (eNodeRole == NODE_ROLE_FORWARDER) {
+
+        MESHNETWORK_bSendPacket(pBuf, u32Len);
+        DBG("MeshNetwork: Ack forwarded\r\n");
+
+    }
 
 }
 

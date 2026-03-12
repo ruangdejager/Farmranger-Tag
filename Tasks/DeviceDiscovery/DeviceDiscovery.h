@@ -13,8 +13,10 @@
 #include "MeshNetwork.h" // Includes MeshDiscoveredNeighbor_t
 
 // Discovery Timing
-#define APP_WAKEUP_BUFFER_MS       			 (5 * 1000) // 10 seconds buffer after synchronized wake-up
-#define APP_DISCOVERY_WINDOW_TIMEOUT_MS      (180 * 1000) // 60 seconds for the entire discovery process
+#define APP_WAKEUP_BUFFER_MS       			 (5 * 1000) // 5 seconds buffer after synchronized wake-up
+#define APP_DISCOVERY_WINDOW_TIMEOUT_MS      (180 * 1000) // 3 minutes for the entire discovery process
+
+#define LOST_PRIMARY_TIMEOUT_MIN    480      // ~8 hours
 
 // Event Group Bits for synchronized wake-up
 #define DISCOVERY_WAKEUP_BIT    (1UL << 0UL) // Set by external RTC/timer for synchronized wake-up
@@ -25,6 +27,7 @@
 #define DEVICE_DISCOVERY_DRIVER_bConnectLogger() 						FARMRANGER_bDeviceOn()
 #define DEVICE_DISCOVERY_DRIVER_vDisconnectLogger() 					FARMRANGER_vDeviceOff()
 #define DEVICE_DISCOVERY_DRIVER_u64RequestTS()							FARMRANGER_u64RequestTimestamp()
+#define DEVICE_DISCOVERY_DRIVER_u8RequestInterval()						FARMRANGER_u8RequestInterval()
 #define DEVICE_DISCOVERY_bSendDiscoveryData(items, size)				FARMRANGER_bLogData(items, size)
 
 /**

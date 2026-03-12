@@ -25,8 +25,6 @@
 #define APP_TASK_PRIORITY       	(configMAX_PRIORITIES - 3) // Lower priority for app logic
 #define APP_TASK_STACK_SIZE     	(configMINIMAL_STACK_SIZE * 10)
 
-#define LOST_PRIMARY_TIMEOUT_MIN    480      // ~8 hours
-
 // --- PRIVATE FREE_RTOS RESOURCES ---
 static EventGroupHandle_t xDiscoveryEventGroup;
 DeviceRole_e eDeviceRole;
@@ -253,7 +251,7 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 			{
 				DBG("DeviceDiscovery %X: Log FAILED.\r\n",
 					LORARADIO_u32GetUniqueId());
-				vTaskDelay(pdMS_TO_TICKS(5000));
+				vTaskDelay(pdMS_TO_TICKS(2000));
 			}
 
 			// Timestamp sync
@@ -267,6 +265,21 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 				DBG("DeviceDiscovery: Failed to get timestamp\n");
 			}
 
+			uint8_t u8WakeInterval = DEVICE_DISCOVERY_DRIVER_u8RequestInterval();
+			if (u8WakeInterval == 15)
+			{
+				MESHNETWORK_vSetWakeupInterval(WAKEUP_INTERVAL_15_MIN);
+			} else if (u8WakeInterval == 30)
+			{
+				MESHNETWORK_vSetWakeupInterval(WAKEUP_INTERVAL_30_MIN);
+			} else if (u8WakeInterval == 60)
+			{
+				MESHNETWORK_vSetWakeupInterval(WAKEUP_INTERVAL_60_MIN);
+			} else if (u8WakeInterval == 120)
+			{
+				MESHNETWORK_vSetWakeupInterval(WAKEUP_INTERVAL_120_MIN);
+			}
+
 			DEVICE_DISCOVERY_DRIVER_vDisconnectLogger();
 //			BSP_LED_Off(LED_GREEN);
 #endif
@@ -274,13 +287,13 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 			/* Discovery finished: send TimeSync */
 			DEVICE_DISCOVERY_vSendTS();
 
-			vTaskDelay(pdMS_TO_TICKS(10000));
+			vTaskDelay(pdMS_TO_TICKS(5000));
 
 		}
 		else
 		{
 			/* Secondary nodes just chill after rounds */
-			vTaskDelay(pdMS_TO_TICKS(10000));
+			vTaskDelay(pdMS_TO_TICKS(5000));
 		}
 
 		// ---------------------------------------------------------------------

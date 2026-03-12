@@ -31,6 +31,7 @@ void FARMRANGER_vNotifyOnRX(void);
 bool FARMRANGER_bDeviceOn(void);
 void FARMRANGER_vDeviceOff(void);
 uint64_t FARMRANGER_u64RequestTimestamp(void);
+uint8_t FARMRANGER_u8RequestInterval(void);
 bool FARMRANGER_bLogData(MeshDiscoveredNeighbor_t * neighbors, uint16_t count);
 
 

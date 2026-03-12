@@ -328,6 +328,34 @@ BaseType_t FARMRANGER_tParseTimestamp(const char *line, void *ctx)
 	return pdFALSE;
 }
 
+BaseType_t FARMRANGER_tParseInterval(const char *line, void *ctx)
+{
+	// Expect format: "60\r\n"
+
+	char *out = (char *)ctx;
+
+	size_t len = strlen(line);
+
+	// Expect: 3 digits + "\r\n"
+	if (len >= 3 && len < 6 && line[len-2] == '\r' && line[len-1] == '\n')
+	{
+		// Validate all 3 characters are digits
+		for (int i = 0; i < len-2; i++)
+		{
+			if (line[i] < '0' || line[i] > '9')
+				return pdFALSE;
+		}
+
+		// Copy only the 3 digits
+		memcpy(out, line, len-2);
+		out[len-2] = '\0';
+
+		return pdTRUE;
+	}
+
+	return pdFALSE;
+}
+
 
 uint64_t FARMRANGER_u64RequestTimestamp(void)
 {
@@ -347,6 +375,27 @@ uint64_t FARMRANGER_u64RequestTimestamp(void)
     }
 
     return tsValue;
+
+}
+
+uint8_t FARMRANGER_u8RequestInterval(void)
+{
+
+    char intStr[32] = {0};
+    uint8_t intValue = 0; // default if fail
+
+    if (FARMRANGER_tATSend("AT+INTREQ\r\n",
+    			FARMRANGER_tParseInterval,
+                intStr,
+                sizeof(intStr),
+				intStr,
+                pdMS_TO_TICKS(10000)) == pdPASS)
+    {
+        // Convert ASCII timestamp (e.g., "60") to uint8_t
+        intValue = strtoull(intStr, NULL, 10);
+    }
+
+    return intValue;
 
 }
 
