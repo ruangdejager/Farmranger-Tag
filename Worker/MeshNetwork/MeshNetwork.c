@@ -21,6 +21,8 @@
 #include "hal_rtc.h"
 #include "Battery.h"
 
+#include "flashLog.h"
+
 
 /* Local config aliases */
 #define MESH_BEACON_INTERVAL_MS_CFG 			MESH_BEACON_INTERVAL_MS
@@ -340,6 +342,7 @@ static void MESHNETWORK_vHandleDReq(const uint8_t *pBuf, size_t u32Len, int16_t 
 
     DBG("MeshNetwork: DReq received: dreq=%08X origin=%04X hop=%u rssi=%d\r\n",
     		u32DreqId, u32OriginId, u8SenderHopCount, s16Rssi);
+	LOG(LOG_RX_DREQ, s16Rssi);
 
     /* ignore our own rounds */
     if (u32OriginId == LORARADIO_u32GetUniqueId()) return;
@@ -391,6 +394,7 @@ static void MESHNETWORK_vHandleDBeacon(const uint8_t *pBuf,
         tBeacon.u16BatMv,
         tBeacon.i16Rssi,
         tBeacon.u32BeaconMsgId);
+    LOG(LOG_RX_BEACON, s16Rssi);
 
     /* ---------------------------------------------------------
      * 1. DEDUPLICATE FIRST (all roles)
@@ -459,6 +463,7 @@ static void MESHNETWORK_vHandleDAck(const uint8_t *pBuf, size_t u32Len, int16_t 
     for (uint8_t i=0;i<u8AckCount;i++) u32Ids[i] = read_u32_be(&pBuf[10 + 4*i]);
 
     DBG("MeshNetwork: DAck Received: ackId=%08X dreq=%08X count=%u\r\n", u32AckMsgId, u32DreqId, u8AckCount);
+    LOG(LOG_RX_ACK, s16Rssi);
 
     if (FORWARD_bHasSeen(u32AckMsgId))
     {
@@ -492,6 +497,7 @@ static void MESHNETWORK_vHandleTimeSync(const uint8_t *pBuf, size_t u32Len, int1
     WakeupInterval tInterval = (WakeupInterval)pBuf[5];
 
     DBG("MeshNetwork: TimeSync received: utc=%u interval=%u\r\n", u32Utc, tInterval);
+    LOG(LOG_RX_TS, s16Rssi);
 
     if (FORWARD_bHasSeen(u32Utc))
 	{

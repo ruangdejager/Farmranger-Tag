@@ -20,6 +20,7 @@
 #include "platform.h"
 #include "Power.h"
 #include "MpptChg.h"
+#include "flashLog.h"
 
 // --- PRIVATE DEFINES ---
 #define APP_TASK_PRIORITY       	(configMAX_PRIORITIES - 3) // Lower priority for app logic
@@ -67,6 +68,7 @@ void DEVICE_DISCOVERY_vInit(void) {
     configASSERT(status == pdPASS);
 
     DBG("DeviceDiscovery: Initialized FreeRTOS resources and created DeviceDiscoveryAppTask.\r\n");
+    LOG(LOG_DISCOVERY_INIT, eDeviceRole);
     if (eDeviceRole == DEVICE_ROLE_PRIMARY)
     {
     	DBG("DeviceDiscovery: Device Role = PRIMARY\r\n");
@@ -110,6 +112,7 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 			bool bDiscoveryFinished = false;
 
 			DBG("DeviceDiscovery: Primary starting discovery campaign\r\n");
+			LOG(LOG_DISCOVERY_START, eDeviceRole);
 
 			while (!bDiscoveryFinished)
 			{
@@ -159,6 +162,8 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 
 			DBG("DeviceDiscovery %X: Secondary waiting for timesync.\r\n",
 				LORARADIO_u32GetUniqueId());
+
+//			FlashLog_Write(LOG_DISCOVERY_INIT, DEVICE_ROLE_SECONDARY);
 
 			// Wait for this round's window to complete
 		    uint32_t ulNotifyValue = 0;
@@ -286,6 +291,7 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 
 			/* Discovery finished: send TimeSync */
 			DEVICE_DISCOVERY_vSendTS();
+			LOG(LOG_TX_TS, eDeviceRole);
 
 			vTaskDelay(pdMS_TO_TICKS(5000));
 
@@ -307,6 +313,7 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 		    ((now - last_heard) > LOST_PRIMARY_TIMEOUT_MIN*60) )
 		{
 		    DBG("DeviceDiscovery: ENTERING RECOVERY MODE.\r\n", LORARADIO_u32GetUniqueId());
+		    LOG(LOG_DISCOVERY_RECOVER, 1);
 		    DEVICE_DISCOVERY_vRecoveryMode();
 		}
 
@@ -421,11 +428,13 @@ static void DEVICE_DISCOVERY_vRecoveryMode(void)
             (HAL_RTC_u64GetValue() - last_heard) < LOST_PRIMARY_TIMEOUT_MIN*60)
         {
         	DBG("DeviceDiscovery: Node %X recovered; PRIMARY FOUND.\r\n", LORARADIO_u32GetUniqueId());
+        	LOG(LOG_DISCOVERY_RECOVER, 0);
             return;
         }
     }
 
     DBG("DeviceDiscovery: Node %X not recovered; NO PRIMARY FOUND.\r\n", LORARADIO_u32GetUniqueId());
+    LOG(LOG_DISCOVERY_RECOVER, 0);
     /* We reset last seen even though we didn't see to let the device sleep before trying another recovery */
     MESHNETWORK_vUpdatePrimaryLastSeen();
 
