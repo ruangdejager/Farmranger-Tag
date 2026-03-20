@@ -262,6 +262,7 @@ static void MESHNETWORK_vBeaconTimerCallback(TimerHandle_t xTimer) {
     tBeacon.dreqWaveDisc = u8PrimaryDreqWaveCnt;
 
     DBG("MeshNetwork: Sending Beacon %08X\r\n", tBeacon.u32BeaconMsgId);
+    LOG(LOG_TX_BEACON, 1);
 
     uint8_t u8Buf[64]; size_t u32Len=0;
     if (!MESHNETWORK_bEncodeDBeacon(&tBeacon, u8Buf, sizeof(u8Buf), &u32Len)) return;
@@ -292,6 +293,7 @@ static void MESHNETWORK_vPrimaryAckTimerCallback(TimerHandle_t xTimer) {
             if (MESHNETWORK_bEncodeDAck(&tAck, u8Buf, sizeof(u8Buf), &u32Len)) {
                 FORWARD_vAdd(tAck.u32AckMsgId);
                 MESHNETWORK_bSendPacket(u8Buf, u32Len);
+                LOG(LOG_TX_ACK, 1);
             }
         }
     }
@@ -342,7 +344,10 @@ static void MESHNETWORK_vHandleDReq(const uint8_t *pBuf, size_t u32Len, int16_t 
 
     DBG("MeshNetwork: DReq received: dreq=%08X origin=%04X hop=%u rssi=%d\r\n",
     		u32DreqId, u32OriginId, u8SenderHopCount, s16Rssi);
-	LOG(LOG_RX_DREQ, s16Rssi);
+
+    uint32_t u32LogValue;
+    FLASHLOG_vEncodeRXLogValue(&u32LogValue, (uint16_t)u32OriginId, s16Rssi, u8WaveCnt);
+	LOG(LOG_RX_DREQ, u32LogValue);
 
     /* ignore our own rounds */
     if (u32OriginId == LORARADIO_u32GetUniqueId()) return;
@@ -355,6 +360,7 @@ static void MESHNETWORK_vHandleDReq(const uint8_t *pBuf, size_t u32Len, int16_t 
                 FORWARD_vAdd(u32DreqId);
                 MESHNETWORK_bSendPacket(u8Out, u32OutLen);
                 DBG("MeshNetwork: DReq forwarded\r\n");
+                LOG(LOG_TX_DREQ, 2);
             }
         } else {
         	DBG("MeshNetwork: DReq seen before\r\n");
@@ -394,7 +400,9 @@ static void MESHNETWORK_vHandleDBeacon(const uint8_t *pBuf,
         tBeacon.u16BatMv,
         tBeacon.i16Rssi,
         tBeacon.u32BeaconMsgId);
-    LOG(LOG_RX_BEACON, s16Rssi);
+    uint32_t u32LogValue;
+    FLASHLOG_vEncodeRXLogValue(&u32LogValue, (uint16_t)tBeacon.u32DeviceId, tBeacon.i16Rssi, 0);
+    LOG(LOG_RX_BEACON, u32LogValue);
 
     /* ---------------------------------------------------------
      * 1. DEDUPLICATE FIRST (all roles)
@@ -446,6 +454,7 @@ static void MESHNETWORK_vHandleDBeacon(const uint8_t *pBuf,
 
         MESHNETWORK_bSendPacket(u8Buf, u32TempLen);
         DBG("MeshNetwork: Forwarding Beacon\r\n");
+        LOG(LOG_TX_BEACON, 2);
 
     }
 
@@ -463,7 +472,9 @@ static void MESHNETWORK_vHandleDAck(const uint8_t *pBuf, size_t u32Len, int16_t 
     for (uint8_t i=0;i<u8AckCount;i++) u32Ids[i] = read_u32_be(&pBuf[10 + 4*i]);
 
     DBG("MeshNetwork: DAck Received: ackId=%08X dreq=%08X count=%u\r\n", u32AckMsgId, u32DreqId, u8AckCount);
-    LOG(LOG_RX_ACK, s16Rssi);
+    uint32_t u32LogValue;
+    FLASHLOG_vEncodeRXLogValue(&u32LogValue, (uint16_t)(u32DreqId >> 16), s16Rssi, u8AckCount);
+    LOG(LOG_RX_ACK, u32LogValue);
 
     if (FORWARD_bHasSeen(u32AckMsgId))
     {
@@ -471,6 +482,13 @@ static void MESHNETWORK_vHandleDAck(const uint8_t *pBuf, size_t u32Len, int16_t 
     	return;
     }
     FORWARD_vAdd(u32AckMsgId);
+
+    /* forwarder behavior */
+    if (eNodeRole == NODE_ROLE_FORWARDER) {
+        MESHNETWORK_bSendPacket(pBuf, u32Len);
+        DBG("MeshNetwork: Ack forwarded\r\n");
+        LOG(LOG_TX_ACK, 2);
+    }
 
     /* if beaconing node and my id is included -> stop beaconing and become forwarder */
     uint32_t u32MyId = LORARADIO_u32GetUniqueId();
@@ -481,14 +499,6 @@ static void MESHNETWORK_vHandleDAck(const uint8_t *pBuf, size_t u32Len, int16_t 
         }
     }
 
-    /* forwarder behavior */
-    if (eNodeRole == NODE_ROLE_FORWARDER) {
-
-        MESHNETWORK_bSendPacket(pBuf, u32Len);
-        DBG("MeshNetwork: Ack forwarded\r\n");
-
-    }
-
 }
 
 static void MESHNETWORK_vHandleTimeSync(const uint8_t *pBuf, size_t u32Len, int16_t s16Rssi) {
@@ -497,7 +507,9 @@ static void MESHNETWORK_vHandleTimeSync(const uint8_t *pBuf, size_t u32Len, int1
     WakeupInterval tInterval = (WakeupInterval)pBuf[5];
 
     DBG("MeshNetwork: TimeSync received: utc=%u interval=%u\r\n", u32Utc, tInterval);
-    LOG(LOG_RX_TS, s16Rssi);
+    uint32_t u32LogValue;
+    FLASHLOG_vEncodeRXLogValue(&u32LogValue, 0, s16Rssi, 0);
+    LOG(LOG_RX_TS, u32LogValue);
 
     if (FORWARD_bHasSeen(u32Utc))
 	{
@@ -513,6 +525,7 @@ static void MESHNETWORK_vHandleTimeSync(const uint8_t *pBuf, size_t u32Len, int1
 
     MESHNETWORK_bSendPacket(pBuf, u32Len);
     DBG("MeshNetwork: TimeSync forwarded\r\n");
+    LOG(LOG_TX_TS, 2);
 
     /* Notify DeviceDiscovery that discovery is complete */
     TaskHandle_t xAppTask = DEVICE_DISCOVERY_xGetTaskHandle();
@@ -684,6 +697,7 @@ bool MESHNETWORK_bStartDiscoveryRound(uint32_t u32DreqId)
     MESHNETWORK_vStartPrimaryAck();
 
     DBG("MeshNetwork: DReq %08X sent from primary\r\n", u32DreqId);
+    LOG(LOG_TX_DREQ, 1);
 
     return true;
 }

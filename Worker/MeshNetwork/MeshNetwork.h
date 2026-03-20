@@ -17,7 +17,7 @@
 #include <stdbool.h>
 
 
-#define MESH_BEACON_INTERVAL_MS            3000U
+#define MESH_BEACON_INTERVAL_MS            5000U
 #define MESH_PRIMARY_ACK_INTERVAL_MS       2000U
 #define MESH_DISCOVERY_IDLE_MS             7000U
 #define FORWARD_RING_SIZE                  32
