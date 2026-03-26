@@ -12,6 +12,7 @@
 #include "queue.h"
 
 #include "dbg_log.h"
+#include "flashLog.h"
 
 #include "str.h"
 
@@ -434,8 +435,9 @@ bool FARMRANGER_bLogData(MeshDiscoveredNeighbor_t *neighbors, uint16_t count)
                            respBuf,
                            sizeof(respBuf),
                            respBuf,
-                           pdMS_TO_TICKS(2000)) != pdPASS)
+                           pdMS_TO_TICKS(3500)) != pdPASS)
     {
+    	LOG(LOG_FRLOG_ERROR, 1);
         DBG("LogData: No 'Logger ready' received.\r\n");
         return false;
     }
@@ -447,8 +449,9 @@ bool FARMRANGER_bLogData(MeshDiscoveredNeighbor_t *neighbors, uint16_t count)
                                (uint8_t*)logBuffer,
     						   pos);
         /* Wait until TX fully drained */
-        if (xSemaphoreTake(xUartTxDoneSem, pdMS_TO_TICKS(3000)) != pdTRUE)
+        if (xSemaphoreTake(xUartTxDoneSem, pdMS_TO_TICKS(3500)) != pdTRUE)
         {
+        	LOG(LOG_FRLOG_ERROR, 2);
             DBG("UART TX timeout\r\n");
             return false;
         }
@@ -462,9 +465,10 @@ bool FARMRANGER_bLogData(MeshDiscoveredNeighbor_t *neighbors, uint16_t count)
                            respBuf,
                            sizeof(respBuf),
                            respBuf,
-                           pdMS_TO_TICKS(2000)) != pdPASS)
+                           pdMS_TO_TICKS(3500)) != pdPASS)
     {
         DBG("LogData: No final OK received.\r\n");
+        LOG(LOG_FRLOG_ERROR, 3);
         return false;
     }
 

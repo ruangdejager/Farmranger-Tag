@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(for dir:*)",
+      "Bash(do echo:*)",
+      "Read(//c/Code/Farmranger Tag/**)",
+      "Bash(done)",
+      "Bash(for f:*)",
+      "Bash(do)",
+      "Bash(echo \"===== $f =====\")"
+    ]
+  }
+}
