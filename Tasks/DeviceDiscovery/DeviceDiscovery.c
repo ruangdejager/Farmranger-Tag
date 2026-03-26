@@ -111,6 +111,32 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 
 		LOG(LOG_DISCOVERY_START, eDeviceRole);
 
+#ifdef LISTENER_MODE
+
+		/* Listener: passively observe the full discovery window, no transmissions */
+		DBG("DeviceDiscovery %X: LISTENER MODE - monitoring network for %d ms\r\n",
+			LORARADIO_u32GetUniqueId(), APP_DISCOVERY_WINDOW_TIMEOUT_MS);
+
+		{
+			uint32_t ulNotifyValue = 0;
+			xTaskNotifyStateClear(NULL);
+			xTaskNotifyWait(0, DEVICE_DISCOVERY_NOTIFY_TIMESYNC, &ulNotifyValue,
+							pdMS_TO_TICKS(APP_DISCOVERY_WINDOW_TIMEOUT_MS));
+
+			if (ulNotifyValue & DEVICE_DISCOVERY_NOTIFY_TIMESYNC)
+			{
+				DBG("DeviceDiscovery %X: Listener received TimeSync - network active\r\n",
+					LORARADIO_u32GetUniqueId());
+			}
+			else
+			{
+				DBG("DeviceDiscovery %X: Listener window timed out - no TimeSync heard\r\n",
+					LORARADIO_u32GetUniqueId());
+			}
+		}
+
+#else /* normal PRIMARY / SECONDARY behavior */
+
 		if (eDeviceRole == DEVICE_ROLE_PRIMARY)
 		{
 
@@ -206,6 +232,8 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 
 		}
 
+#endif /* LISTENER_MODE */
+
 		// ---------------------------------------------------------------------
 		// Primary Processes the UNION of all neighbors
 		// ---------------------------------------------------------------------
@@ -213,6 +241,7 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 			LORARADIO_u32GetUniqueId());
 		LOG(LOG_DISCOVERY_CMPLT, eDeviceRole);
 
+#ifndef LISTENER_MODE
 		if (eDeviceRole == DEVICE_ROLE_PRIMARY)
 		{
 
@@ -322,6 +351,7 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 		    LOG(LOG_DISCOVERY_RECOVER, 1);
 		    DEVICE_DISCOVERY_vRecoveryMode();
 		}
+#endif /* LISTENER_MODE */
 
 		/* ---- Deep sleep normally ---- */
 		/* Reset the node role for the next discovery round */

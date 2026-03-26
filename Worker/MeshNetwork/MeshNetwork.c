@@ -352,6 +352,7 @@ static void MESHNETWORK_vHandleDReq(const uint8_t *pBuf, size_t u32Len, int16_t 
     /* ignore our own rounds */
     if (u32OriginId == LORARADIO_u32GetUniqueId()) return;
 
+#ifndef LISTENER_MODE
     /* forwarder behavior */
     if (eNodeRole == NODE_ROLE_FORWARDER) {
         if (!FORWARD_bHasSeen(u32DreqId)) {
@@ -370,6 +371,7 @@ static void MESHNETWORK_vHandleDReq(const uint8_t *pBuf, size_t u32Len, int16_t 
     	MESHNETWORK_vStartBeaconing(u32DreqId, (uint8_t)(u8SenderHopCount + 1));
     	u8PrimaryDreqWaveCnt = u8WaveCnt;
     }
+#endif /* LISTENER_MODE */
 
     /* Capture RSSI of the received DReq */
     if ((u8PrimaryDreqWaveCnt == u8WaveCnt) && (s16Rssi > i16BestDreqRssi)) i16BestDreqRssi = s16Rssi;
@@ -422,6 +424,7 @@ static void MESHNETWORK_vHandleDBeacon(const uint8_t *pBuf,
     /* ---------------------------------------------------------
      * 3. PRIMARY behavior
      * --------------------------------------------------------- */
+#ifndef LISTENER_MODE
     if (DEVICE_DISCOVERY_eGetDeviceRole() == DEVICE_ROLE_PRIMARY)
     {
         NEIGHBOR_vAddOrUpdate(tBeacon.u32DeviceId,
@@ -457,6 +460,7 @@ static void MESHNETWORK_vHandleDBeacon(const uint8_t *pBuf,
         LOG(LOG_TX_BEACON, 2);
 
     }
+#endif /* LISTENER_MODE */
 
 }
 
@@ -483,6 +487,7 @@ static void MESHNETWORK_vHandleDAck(const uint8_t *pBuf, size_t u32Len, int16_t 
     }
     FORWARD_vAdd(u32AckMsgId);
 
+#ifndef LISTENER_MODE
     /* forwarder behavior */
     if (eNodeRole == NODE_ROLE_FORWARDER) {
         MESHNETWORK_bSendPacket(pBuf, u32Len);
@@ -498,6 +503,7 @@ static void MESHNETWORK_vHandleDAck(const uint8_t *pBuf, size_t u32Len, int16_t 
             break;
         }
     }
+#endif /* LISTENER_MODE */
 
 }
 
@@ -523,9 +529,11 @@ static void MESHNETWORK_vHandleTimeSync(const uint8_t *pBuf, size_t u32Len, int1
 	MESHNETWORK_vUpdatePrimaryLastSeen();
 	DBG("MeshNetwork: TimeSync applied: %u interval=%u\r\n", u32Utc, tInterval);
 
+#ifndef LISTENER_MODE
     MESHNETWORK_bSendPacket(pBuf, u32Len);
     DBG("MeshNetwork: TimeSync forwarded\r\n");
     LOG(LOG_TX_TS, 2);
+#endif /* LISTENER_MODE */
 
     /* Notify DeviceDiscovery that discovery is complete */
     TaskHandle_t xAppTask = DEVICE_DISCOVERY_xGetTaskHandle();
