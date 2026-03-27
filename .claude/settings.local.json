@@ -7,7 +7,8 @@
       "Bash(done)",
       "Bash(for f:*)",
       "Bash(do)",
-      "Bash(echo \"===== $f =====\")"
+      "Bash(echo \"===== $f =====\")",
+      "Bash(git:*)"
     ]
   }
 }

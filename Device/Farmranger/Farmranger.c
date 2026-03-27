@@ -82,7 +82,12 @@ void FARMRANGER_vInit(void)
 
 	// Init UART
 	FR_DRIVER_vInitFRDevice(&farmranger.UartHandle);
-	// UART interface will be enabled/disabled at Farmranger device activation
+
+#ifdef LISTENER_MODE
+	// In listener mode the UART stays permanently enabled from the start
+	FR_DRIVER_vEnableUart(&farmranger.UartHandle);
+#endif
+	// In normal mode, UART is enabled/disabled at Farmranger device activation
 
 	xLineReadySem = xSemaphoreCreateBinary();
 
@@ -116,7 +121,12 @@ void FARMRANGER_vUartOnWake(void)
 	HAL_UART_vInit();
 	// Init UART
 	FR_DRIVER_vInitFRDevice(&farmranger.UartHandle);
+#ifdef LISTENER_MODE
+	// In listener mode the UART stays permanently enabled — re-enable after sleep
+	FR_DRIVER_vEnableUart(&farmranger.UartHandle);
+#else
 	// UART interface will be enabled/disabled at Farmranger device activation
+#endif
 
 }
 
@@ -516,6 +526,21 @@ void HAL_UART_vTxCompleteISR(hal_uart_t *drv)
         portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     }
 }
+
+/* ------------------------------------------------------------------ */
+/* Listener-mode API                                                    */
+/* ------------------------------------------------------------------ */
+#ifdef LISTENER_MODE
+
+void FARMRANGER_vPutString(const uint8_t *data, uint16_t len)
+{
+    for (uint16_t i = 0; i < len; i++)
+    {
+        while (!HAL_UART_vTxPutByte(&farmranger.UartHandle, data[i]));
+    }
+}
+
+#endif /* LISTENER_MODE */
 
 
 
