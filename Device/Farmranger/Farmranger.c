@@ -249,6 +249,8 @@ BaseType_t FARMRANGER_tATSend(const char *cmd,
 
     (void) ulTaskNotifyTake(pdTRUE, 0);
 
+    xSemaphoreTake(xLineReadySem, 0); // Clear any pending line notifications
+
     configASSERT(xATQueue != NULL);
     if (xQueueSend(xATQueue, &req, pdMS_TO_TICKS(100)) != pdPASS)
         return pdFAIL;
@@ -267,6 +269,13 @@ void FARMRANGER_vATHandlerTask(void *args)
     {
         if (xQueueReceive(xATQueue, &req, portMAX_DELAY))
         {
+
+        	// Move resets to HERE, before sending the new command
+			taskENTER_CRITICAL();
+			u8FrRxBufIdx = 0;
+			memset(acFrRxBuf, 0, FR_RX_BUF_LEN);
+			xSemaphoreTake(xLineReadySem, 0);
+			taskEXIT_CRITICAL();
 
         	if (req.cmd && strlen(req.cmd) > 0)
         	{
@@ -303,8 +312,8 @@ void FARMRANGER_vATHandlerTask(void *args)
         		            2,   // TIMEOUT
         		            eSetValueWithOverwrite);
 
-            memset(acFrRxBuf, 0, FR_RX_BUF_LEN);
-            u8FrRxBufIdx = 0;
+//            memset(acFrRxBuf, 0, FR_RX_BUF_LEN);
+//            u8FrRxBufIdx = 0;
         }
     }
 }
@@ -445,11 +454,12 @@ bool FARMRANGER_bLogData(MeshDiscoveredNeighbor_t *neighbors, uint16_t count)
                            respBuf,
                            sizeof(respBuf),
                            respBuf,
-                           pdMS_TO_TICKS(3500)) != pdPASS)
+                           pdMS_TO_TICKS(1000)) != pdPASS)
     {
     	LOG(LOG_FRLOG_ERROR, 1);
         DBG("LogData: No 'Logger ready' received.\r\n");
-        return false;
+        BSP_LED_On(LED_GREEN);
+//        return false;
     }
 
     if (pos > 0)
@@ -488,12 +498,10 @@ bool FARMRANGER_bLogData(MeshDiscoveredNeighbor_t *neighbors, uint16_t count)
 
 BaseType_t FARMRANGER_tParseLoggerReady(const char *line, void *ctx)
 {
-    if (strstr(line, "Logger ready\r\n") != NULL)
+    if (line != NULL && strstr(line, "Logger ready") != NULL)
         return pdTRUE;
-
     return pdFALSE;
 }
-
 BaseType_t FARMRANGER_tParseOK(const char *line, void *ctx)
 {
     if (!line) return pdFALSE;

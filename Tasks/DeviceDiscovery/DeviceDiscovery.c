@@ -374,6 +374,7 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 		DBG("DeviceDiscovery: Waiting for synchronized wake-up...\r\n");
 		vTaskDelay(pdMS_TO_TICKS(100));
 		/* Turn off radio and deep sleep... zzz... */
+		BSP_LED_Off(LED_GREEN);
 		LORARADIO_vEnterDeepSleep();
 		SYSTEM_vActivateDeepSleep();
 
