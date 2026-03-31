@@ -135,6 +135,33 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 			}
 		}
 
+		/* Report devices observed during the listener window */
+		{
+			MeshDiscoveredNeighbor_t tNeighbors[MESH_MAX_NEIGHBORS];
+			uint16_t u16NeighborCount = 0;
+
+			if (MESHNETWORK_bGetDiscoveredNeighbors(tNeighbors, MESH_MAX_NEIGHBORS, &u16NeighborCount))
+			{
+				DBG("DeviceDiscovery %X: Listener observed %u device(s).\r\n",
+					LORARADIO_u32GetUniqueId(), u16NeighborCount);
+				LOG(LOG_DISCOVERY_COUNT, u16NeighborCount);
+				for (uint16_t i = 0; i < u16NeighborCount; i++)
+				{
+					DBG("  ID:%X  Hops:%X  RSSI:%d  Bat:%d  Wave:%d\r\n",
+						tNeighbors[i].u32DeviceId,
+						tNeighbors[i].u8HopCount,
+						tNeighbors[i].i16Rssi,
+						tNeighbors[i].u16BatMv,
+						tNeighbors[i].u8Wave);
+				}
+			}
+			else
+			{
+				DBG("DeviceDiscovery %X: Error retrieving neighbor table.\r\n",
+					LORARADIO_u32GetUniqueId());
+			}
+		}
+
 #else /* normal PRIMARY / SECONDARY behavior */
 
 		if (eDeviceRole == DEVICE_ROLE_PRIMARY)
