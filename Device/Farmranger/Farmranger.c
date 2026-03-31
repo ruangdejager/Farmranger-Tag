@@ -28,9 +28,16 @@
 #define FR_AT_HANDLER_TASK_PRIORITY      (configMAX_PRIORITIES - 2) // Lower priority than the RX task
 #define FR_AT_HANDLER_TASK_STACK_SIZE    (configMINIMAL_STACK_SIZE*2)
 
+#define FR_DBG_TX_TASK_PRIORITY   (tskIDLE_PRIORITY + 1)
+#define FR_DBG_TX_TASK_STACK_SIZE (configMINIMAL_STACK_SIZE)
+
+#define FR_DBG_TX_STR_LEN    128
+#define FR_DBG_TX_QUEUE_DEPTH 8
+
 // --- PRIVATE FREE_RTOS TASK HANDLEs ---
 TaskHandle_t Farmranger_vRxTask_handle;
 TaskHandle_t Farmranger_vATHandlerTask_handle;
+static TaskHandle_t Farmranger_vDbgTxTask_handle;
 
 // Buffer to build msgs before parsing
 #define FR_RX_BUF_LEN 128
@@ -42,6 +49,15 @@ static char acFrLineBuf[FR_RX_BUF_LEN];
 static QueueHandle_t xATQueue;
 
 static SemaphoreHandle_t xUartTxDoneSem;
+
+#ifdef LISTENER_MODE
+typedef struct {
+    char str[FR_DBG_TX_STR_LEN];
+    uint16_t len;
+} DbgTxItem_t;
+
+static QueueHandle_t xDbgTxQueue;
+#endif
 
 bool bFRDeviceOn;
 
@@ -70,6 +86,9 @@ BaseType_t FARMRANGER_tATSend(const char *cmd,
                    void *context,
                    TickType_t timeout);
 void FARMRANGER_vATHandlerTask(void *args);
+#ifdef LISTENER_MODE
+void FARMRANGER_vDbgTxTask(void *args);
+#endif
 BaseType_t FARMRANGER_tParseTimestamp(const char *line, void *ctx);
 BaseType_t FARMRANGER_tParseLoggerReady(const char *line, void *ctx);
 BaseType_t FARMRANGER_tParseOK(const char *line, void *ctx);
@@ -97,6 +116,11 @@ void FARMRANGER_vInit(void)
 	xATQueue = xQueueCreate(4, sizeof(ATReq_t));
 	configASSERT(xATQueue != NULL);
 
+#ifdef LISTENER_MODE
+	xDbgTxQueue = xQueueCreate(FR_DBG_TX_QUEUE_DEPTH, sizeof(DbgTxItem_t));
+	configASSERT(xDbgTxQueue != NULL);
+#endif
+
     BaseType_t status;
     status = xTaskCreate(FARMRANGER_vRxTask,
             "FarmrangerRxTask",
@@ -110,6 +134,14 @@ void FARMRANGER_vInit(void)
             NULL,
             FR_AT_HANDLER_TASK_PRIORITY,
 			&Farmranger_vATHandlerTask_handle);
+#ifdef LISTENER_MODE
+    status = xTaskCreate(FARMRANGER_vDbgTxTask,
+            "FarmrangerDbgTxTask",
+            FR_DBG_TX_TASK_STACK_SIZE,
+            NULL,
+            FR_DBG_TX_TASK_PRIORITY,
+			&Farmranger_vDbgTxTask_handle);
+#endif
 
     configASSERT(status == pdPASS);
 
@@ -542,16 +574,31 @@ void HAL_UART_vTxCompleteISR(hal_uart_t *drv)
 
 void FARMRANGER_vPutString(const uint8_t *data, uint16_t len)
 {
-    // 3. Send the actual payload (CSV buffer)
-	HAL_UART_vTxPutBuffer(&farmranger.UartHandle,
-                           (uint8_t*)data,
-						   len);
-    /* Wait until TX fully drained */
-    if (xSemaphoreTake(xUartTxDoneSem, pdMS_TO_TICKS(3500)) != pdTRUE)
+    if (xDbgTxQueue == NULL || len == 0)
+        return;
+
+    DbgTxItem_t item;
+    if (len > FR_DBG_TX_STR_LEN)
+        len = FR_DBG_TX_STR_LEN;
+
+    memcpy(item.str, data, len);
+    item.len = len;
+
+    xQueueSend(xDbgTxQueue, &item, 0);
+}
+
+void FARMRANGER_vDbgTxTask(void *args)
+{
+    DbgTxItem_t item;
+
+    for (;;)
     {
-    	LOG(LOG_FRLOG_ERROR, 2);
-//        DBG("UART TX timeout\r\n");
-//        return false;
+        if (xQueueReceive(xDbgTxQueue, &item, portMAX_DELAY) == pdTRUE)
+        {
+            HAL_UART_vTxPutBuffer(&farmranger.UartHandle,
+                                  (uint8_t*)item.str,
+                                  item.len);
+        }
     }
 }
 
