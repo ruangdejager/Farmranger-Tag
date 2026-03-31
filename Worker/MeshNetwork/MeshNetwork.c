@@ -424,7 +424,7 @@ static void MESHNETWORK_vHandleDBeacon(const uint8_t *pBuf,
     /* ---------------------------------------------------------
      * 3. PRIMARY behavior
      * --------------------------------------------------------- */
-#ifndef LISTENER_MODE
+
     if (DEVICE_DISCOVERY_eGetDeviceRole() == DEVICE_ROLE_PRIMARY)
     {
         NEIGHBOR_vAddOrUpdate(tBeacon.u32DeviceId,
@@ -437,6 +437,8 @@ static void MESHNETWORK_vHandleDBeacon(const uint8_t *pBuf,
         tLastBeaconHeardTick = xTaskGetTickCount();
         return;
     }
+
+#ifndef LISTENER_MODE
 
     /* ---------------------------------------------------------
      * 4. SECONDARY behavior (forward exactly once)

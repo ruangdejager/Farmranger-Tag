@@ -253,6 +253,7 @@ void DEVICE_DISCOVERY_vAppTask(void *pvParameters)
 			{
 				DBG("DeviceDiscovery %X: Final UNION Result: %u neighbors discovered.\r\n",
 					LORARADIO_u32GetUniqueId(), u16NeighborCount);
+				LOG(LOG_DISCOVERY_COUNT, u16NeighborCount);
 				for (uint16_t i = 0; i < u16NeighborCount; i++)
 				{
 					DBG("  ID:%X  Hops:%X  RSSI:%d  Bat:%d  Wave:%d\r\n",

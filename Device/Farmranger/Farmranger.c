@@ -542,9 +542,16 @@ void HAL_UART_vTxCompleteISR(hal_uart_t *drv)
 
 void FARMRANGER_vPutString(const uint8_t *data, uint16_t len)
 {
-    for (uint16_t i = 0; i < len; i++)
+    // 3. Send the actual payload (CSV buffer)
+	HAL_UART_vTxPutBuffer(&farmranger.UartHandle,
+                           (uint8_t*)data,
+						   len);
+    /* Wait until TX fully drained */
+    if (xSemaphoreTake(xUartTxDoneSem, pdMS_TO_TICKS(3500)) != pdTRUE)
     {
-        while (!HAL_UART_vTxPutByte(&farmranger.UartHandle, data[i]));
+    	LOG(LOG_FRLOG_ERROR, 2);
+//        DBG("UART TX timeout\r\n");
+//        return false;
     }
 }
 
